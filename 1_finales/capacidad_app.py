@@ -7,6 +7,7 @@ defecto viene puesto el dia de ayer, que es el caso mas comun.
 """
 
 import os
+import re
 import sys
 import traceback
 from datetime import datetime
@@ -122,9 +123,30 @@ class Trabajador(QObject):
                     "Cierra todas sus ventanas y vuelve a intentar.")
         if "Pedidos de vehiculos" in t:
             return t
-        if "401" in t or "403" in t:
+        # Se compara contra el codigo que devolvio la API, no contra el
+        # texto suelto: buscar "401" en cualquier parte del mensaje
+        # etiquetaba como sesion caduca errores que no lo eran, y la
+        # persona volvia a entrar una y otra vez sin arreglar nada.
+        # 401 y 403 no son lo mismo y mandan a la persona a sitios
+        # distintos. Cuando se trataban igual, una compañera sin permiso
+        # reinicio sesion cuatro veces seguidas sin que sirviera: el
+        # mensaje decia "caduco" cuando lo que faltaba era acceso.
+        if re.search(r"respondio 401\b", t):
             return ("La sesion caduco.\n"
                     "Vuelve a iniciar sesion en la ventana de Chrome.")
+        if re.search(r"respondio 403\b", t):
+            return ("Tu cuenta no tiene acceso a Pedidos de vehiculos.\n\n"
+                    "No es la sesion: entraste bien, pero Mercado Libre no\n"
+                    "deja ver esta seccion con tu usuario. Compruebalo tu\n"
+                    "misma abriendo esta direccion en Chrome:\n\n"
+                    "envios.adminml.com/logistics/travel-requests/last-mile\n\n"
+                    "Si ahi tampoco entras, pide el permiso a quien\n"
+                    "administre las cuentas de Mercado Libre.")
+        if re.search(r"respondio 422\b", t):
+            return ("Mercado Libre rechazo la consulta (422).\n\n"
+                    "Suele ser una version vieja del programa: MELI bajo el\n"
+                    "limite de resultados por pagina en septiembre de 2026.\n"
+                    "Pide la version actualizada de CapacidadMeli.exe.")
         return t
 
 
