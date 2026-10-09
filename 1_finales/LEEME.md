@@ -11,7 +11,7 @@ llevó hasta ellos.
 | **`CasosPNR.exe`** | Reclamos PNR del período: driver, paquete, monto | ~10 s |
 | **`CapacidadMeli.exe`** | Pedidos de vehículos por estación y tipo | ~1 s/día |
 | **`MapasMeli.exe`** | Paradas de cada ruta con sus coordenadas | ~1 min/día |
-| **`EstatusPaquetesMeli.exe`** | Último estatus de cada paquete RTS, escrito en la hoja | ~2 s/paquete |
+| **`Extractor_RTS.exe`** | Último estatus de cada paquete RTS, escrito en la hoja | ~2 s/paquete |
 
 ## `DriversMeli.exe` — el padrón
 
@@ -336,7 +336,7 @@ de la `RUTA` (C1_AM1) se lee del HTML de cada ficha, en lotes paralelos.
 
 ---
 
-## `EstatusPaquetesMeli.exe` — el estatus de los RTS
+## `Extractor_RTS.exe` — el estatus de los RTS
 
 ```
 Paquetes con FECHA desde [01/10/2026 ▾]
@@ -369,8 +369,8 @@ público. Se reparte aparte. Para compilarlo hace falta
 `webapp_sheets.json` junto al código (`{"url": ".../exec", "token": "..."}`):
 
 ```
-pyinstaller --onefile --windowed --name EstatusPaquetesMeli ^
-    --add-data "webapp_sheets.json;." estatus_app.py
+pyinstaller --onefile --windowed --name Extractor_RTS ^
+    --collect-all selenium --add-data "webapp_sheets.json;." estatus_app.py
 ```
 
 La Web App está en `apps_script/estatus_paquetes.gs`, con la instalación

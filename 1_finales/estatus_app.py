@@ -10,8 +10,13 @@ La primera vez llena todo; las siguientes solo reconsultan los paquetes
 cuyo estatus aun puede cambiar (todo menos Entregado, Dañado y Devuelto).
 
 Compilar (ver LEEME.md):
-    pyinstaller --onefile --windowed --name EstatusPaquetesMeli ^
-        --add-data "webapp_sheets.json;." estatus_app.py
+    pyinstaller --onefile --windowed --name Extractor_RTS ^
+        --collect-all selenium --add-data "webapp_sheets.json;." estatus_app.py
+
+--collect-all selenium no es opcional: Selenium importa sus modulos al
+vuelo y PyInstaller no los ve; sin eso el .exe falla con "No module named
+selenium.webdriver.chrome.webdriver". Tambien mete selenium-manager, que
+baja el chromedriver que corresponde al Chrome de cada computadora.
 """
 
 import os
@@ -70,7 +75,7 @@ class Trabajador(QObject):
 class Ventana(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Estatus de paquetes - Mercado Libre")
+        self.setWindowTitle("Extractor RTS - Mercado Libre")
         self.resize(640, 480)
         self.setMinimumSize(580, 430)
         self.trabajando = False
@@ -85,7 +90,7 @@ class Ventana(QMainWindow):
         raiz.setContentsMargins(12, 10, 12, 10)
         raiz.setSpacing(7)
 
-        titulo = QLabel("ESTATUS DE PAQUETES")
+        titulo = QLabel("EXTRACTOR RTS")
         titulo.setStyleSheet(
             f"color: {TEXTO}; font-family: {FUENTE_NUM}; font-size: 17px;"
             f" font-weight: 900; letter-spacing: 1px;")
@@ -113,6 +118,8 @@ class Ventana(QMainWindow):
         f = nucleo.FECHA_INICIAL
         self.desde.setDate(QDate(f.year, f.month, f.day))
         self.desde.setFixedHeight(30)
+        # Con el ancho por defecto el año se ve cortado ("01/10/202")
+        self.desde.setMinimumWidth(130)
         self.desde.setStyleSheet(
             f"QDateEdit {{ background: {PANEL}; color: {TEXTO};"
             f" border: 1px solid {BORDE}; border-radius: 6px;"

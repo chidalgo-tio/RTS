@@ -88,4 +88,4 @@ webapp_sheets.json
 
 # El ejecutable de estatus lleva dentro la URL y la clave de la Web App:
 # el repo es publico, asi que se reparte aparte (Drive, correo), nunca aqui
-1_finales/EstatusPaquetesMeli.exe
+1_finales/Extractor_RTS.exe
