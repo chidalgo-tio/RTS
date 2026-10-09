@@ -1,6 +1,6 @@
 # Los programas que se usan
 
-Estos seis son los definitivos. Todo lo demás en el repo es el camino que
+Estos siete son los definitivos. Todo lo demás en el repo es el camino que
 llevó hasta ellos.
 
 | Programa | Qué hace | Tiempo |
@@ -11,6 +11,7 @@ llevó hasta ellos.
 | **`CasosPNR.exe`** | Reclamos PNR del período: driver, paquete, monto | ~10 s |
 | **`CapacidadMeli.exe`** | Pedidos de vehículos por estación y tipo | ~1 s/día |
 | **`MapasMeli.exe`** | Paradas de cada ruta con sus coordenadas | ~1 min/día |
+| **`EstatusPaquetesMeli.exe`** | Último estatus de cada paquete RTS, escrito en la hoja | ~2 s/paquete |
 
 ## `DriversMeli.exe` — el padrón
 
@@ -334,6 +335,47 @@ Milla SP → Service Partner; MLP → RD; con sufijo SDD → SDD), y el nombre
 de la `RUTA` (C1_AM1) se lee del HTML de cada ficha, en lotes paralelos.
 
 ---
+
+## `EstatusPaquetesMeli.exe` — el estatus de los RTS
+
+```
+Paquetes con FECHA desde [01/10/2026 ▾]
+[ ACTUALIZAR ESTATUS ]  [ DETENER ]
+```
+
+Lee la hoja **CONSOLIDADO_RTS** (ids en la columna C), abre la ficha de
+cada paquete en el panel y escribe el primer estado del *Historial del
+paquete* —el más reciente— en **H** y su fecha en **I**
+(`21/09/2026 14:20`).
+
+**Qué filas toca**: solo las de FECHA (columna A) desde el día elegido, y
+de esas, las que no tienen estatus o tienen uno que todavía puede cambiar.
+Las que dicen **Entregado, Dañado o Devuelto** ya no se consultan ni se
+tocan (cuenta el inicio del texto: *Entregado - Place* también). Así la
+primera corrida llena todo y las siguientes solo refrescan lo vivo.
+
+**Cualquiera lo puede correr, en cualquier PC con Windows y Chrome**: no
+pide cuenta de Google. Escribe a través de una Web App de Apps Script que
+corre como el dueño de la hoja, y la URL y la clave van dentro del `.exe`.
+Lo único que pide es iniciar sesión en Mercado Libre la primera vez, en la
+ventana de Chrome que abre.
+
+**El SC importa**: el panel solo muestra los paquetes del SC elegido en
+"Estás viendo". Los de otro SC salen como *no se vieron* y su fila no se
+toca.
+
+**El `.exe` no está en el repo**: lleva la clave de la Web App y el repo es
+público. Se reparte aparte. Para compilarlo hace falta
+`webapp_sheets.json` junto al código (`{"url": ".../exec", "token": "..."}`):
+
+```
+pyinstaller --onefile --windowed --name EstatusPaquetesMeli ^
+    --add-data "webapp_sheets.json;." estatus_app.py
+```
+
+La Web App está en `apps_script/estatus_paquetes.gs`, con la instalación
+explicada arriba del archivo. La hoja se elige en `SHEET_ID`, al inicio de
+`extraer_estatus_paquetes.py`.
 
 ## Requisitos
 
