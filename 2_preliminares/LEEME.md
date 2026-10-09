@@ -21,6 +21,7 @@ funciona — en un caso se probaron 30 combinaciones y las 30 dieron 404.
 | Falta el ID en la prefactura | `SondearRuta.exe`, `SondearMonitoring.exe` |
 | `ExtraerRutas.exe` sin datos | `SondearRutas.exe` → `VerRutaCompleta.exe` |
 | Falta el nombre de ruta | `ProbarHtmlRuta.exe` |
+| `FechaPromesa.exe` da "Error" o fechas vacías | `sondear_paquete.py` → `sondear_html_paquete.py` |
 
 ## Qué encontró cada una
 
@@ -54,6 +55,22 @@ funciona — en un caso se probaron 30 combinaciones y las 30 dieron 404.
   `C1_AM1`. No está en ninguna respuesta JSON.
 - **`ProbarHtmlRuta`** — lo encontró: la ficha llega del servidor con el
   nombre ya puesto. 0.7 s por ruta, ~12 s para 168 en paralelo.
+
+### Fecha promesa
+
+- **`sondear_paquete.py`** — espía la ficha de un paquete al cargar y al
+  pulsar "Dirección de entrega". Resultado: **ninguna API de datos**, solo
+  menú y notificaciones; la ficha pesa 1.3 MB y trae "promise" en el HTML.
+- **`sondear_html_paquete.py <id>`** — pide esa ficha con `fetch` y la
+  guarda. Ahí estaba `window.__PRELOADED_STATE__.shipmentDetail` con
+  `promise_date`, `zip_code` y `city`. También destapó la pantalla
+  "No autorizado" de los paquetes de otro SC.
+- **`probar_fechapromesa.py <fechapromesa.py> @ids.txt`** — corre la lógica
+  del extractor contra el panel real, sin la ventana, y escribe el CSV.
+
+Las tres usan el perfil `chrome_profile_sonda/` junto al script, y sus
+salidas (`ficha_*.html`, `reporte_paquete.json`) traen dirección y
+teléfono del destinatario: están en `.gitignore`.
 
 ---
 

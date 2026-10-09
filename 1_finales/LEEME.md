@@ -1,6 +1,6 @@
 # Los programas que se usan
 
-Estos siete son los definitivos. Todo lo demás en el repo es el camino que
+Estos ocho son los definitivos. Todo lo demás en el repo es el camino que
 llevó hasta ellos.
 
 | Programa | Qué hace | Tiempo |
@@ -12,6 +12,7 @@ llevó hasta ellos.
 | **`CapacidadMeli.exe`** | Pedidos de vehículos por estación y tipo | ~1 s/día |
 | **`MapasMeli.exe`** | Paradas de cada ruta con sus coordenadas | ~1 min/día |
 | **`Extractor_RTS.exe`** | Último estatus de cada paquete RTS, escrito en la hoja | ~2 s/paquete |
+| **`FechaPromesa.exe`** | Fecha promesa, CP y ciudad de una lista de paquetes | ~7 s/70 paquetes |
 
 ## `DriversMeli.exe` — el padrón
 
@@ -376,6 +377,49 @@ pyinstaller --onefile --windowed --name Extractor_RTS ^
 La Web App está en `apps_script/estatus_paquetes.gs`, con la instalación
 explicada arriba del archivo. La hoja se elige en `SHEET_ID`, al inicio de
 `extraer_estatus_paquetes.py`.
+
+## `FechaPromesa.exe` — fecha promesa de una lista de paquetes
+
+```
+1. Abrir Navegador / Login   →  inicias sesión en Chrome
+2. Iniciar Extracción        →  pega los IDs (columna de Excel)
+Guardar Resultado (CSV)      →  ID, Fecha Promesa, CP, Ciudad
+```
+
+Es la versión por API de `fechapromesa.py` de
+[`meli_extractores`](https://github.com/jairocarrizales/meli_extractores),
+que abría cada paquete y esperaba de 4 a 8 s. Ahora 69 paquetes tardan 7 s.
+
+**De dónde sale cada cosa.** La ficha `/package-management/package/<id>`
+no consume ninguna API: llega del servidor con todo dentro de
+`window.__PRELOADED_STATE__` (el mismo caso que el nombre de ruta). Se pide
+el HTML con `fetch`, se recorta el objeto **dentro de Chrome** —cada ficha
+pesa 1.3 MB— y solo viajan cuatro campos, 12 paquetes a la vez:
+
+| Columna | Campo de `shipmentDetail` |
+|---|---|
+| Fecha Promesa | `promise_date.to` → `dd/mmm` en hora de México |
+| CP | `receiver_info.zip_code` |
+| Ciudad | `receiver_info.city` |
+
+La pantalla muestra la promesa como rango (`09/sep - 12/sep`) y se reporta
+la fecha final. **Si es de un solo día, `to` llega vacío** y la fecha está
+en `from` (`08/oct`) — un paquete de 69 en la prueba.
+
+**Lo que no es un error:**
+
+- `No autorizado` — el panel responde 200 con la pantalla "Necesitas
+  autorización": el paquete no pertenece al SC de "Estás viendo". Cambia de
+  SC y corre esos IDs aparte. No se reintentan.
+- `No existe` — el ID no es de ningún paquete (HTTP 422).
+
+Si la sesión caduca a la mitad, el programa se pausa solo: inicia sesión en
+Chrome y presiona **Reanudar**.
+
+```
+pyinstaller --onefile --windowed --collect-all selenium ^
+    --name FechaPromesa fechapromesa.py
+```
 
 ## Requisitos
 
