@@ -27,7 +27,7 @@
 // Hoja por defecto. El extractor manda la suya (SHEET_ID y HOJA arriba
 // en extraer_estatus_paquetes.py), que es la que manda; esta solo se usa
 // si un pedido no la trae, como al ejecutar autorizar() desde el editor
-const SHEET_ID = '1nRKP8V_XsjnjZyFISwtnxT09KAMmSMWR0Set-OtlcxE';
+const SHEET_ID = '1hQvyCcWZGOo4rQcinDmWg_kYaOfZTcS3H7IZSBeaE9c';
 const HOJA = 'CONSOLIDADO_RTS';
 const TOKEN = 'CAMBIA-ESTA-CLAVE';
 
