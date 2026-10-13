@@ -1,31 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-Ultimo estatus de cada paquete - Mercado Libre Envios
+Ultimo estatus de cada paquete - Mercado Libre Envios (Extractor_RTS)
 
-Lee los ids de paquete de la hoja CONSOLIDADO_RTS (columna C), abre la
-ficha de cada uno en el panel:
+Revisa dos hojas del mismo archivo y, para cada paquete, abre su ficha en
+el panel:
 
     https://envios.adminml.com/logistics/package-management/package/<id>
 
-y escribe en la misma hoja el ultimo estado del "Historial del paquete"
-(el primero de la lista, que es el mas reciente) y su fecha:
+de donde toma el primer estado del "Historial del paquete" (el mas
+reciente) y su fecha ("21/09/2026 14:20").
 
-    H = estatus         ("Para despachar")
-    I = fecha y hora    ("21/09/2026 14:20")
+  CONSOLIDADO_RTS   id en C -> estatus en H, fecha en I
+                    No reconsulta Entregado, Dañado ni Devuelto.
+  DEVOLUCIONES      id en D -> estatus en E, fecha en F, alerta en G
+                    Reconsulta todo lo que no este en Devuelto. En G pone
+                    "ALERTA 24 HRS" si desde la FECHA (A) pasaron 24 horas,
+                    o "MAYOR A 48 HRS" si pasaron 48.
 
-Que filas se consultan:
-  - Solo las que tienen FECHA (columna A) desde FECHA_INICIAL (01-10-26).
-  - Las que aun no tienen estatus, y las que tienen uno que todavia puede
-    cambiar. Las de estatus final (Entregado, Dañado, Devuelto) ya no se
-    vuelven a consultar ni se tocan.
+En las dos, solo filas con FECHA (columna A) desde FECHA_INICIAL (01-10-26).
 
 Como se obtiene el dato: la ficha se lee tal como la dibuja el panel
 (texto de la pagina a partir de "Historial del paquete"). La API que la
 alimenta aun no esta descubierta; ver skills/api-en-vez-de-scraping.
 
 Acceso a Google Sheets: a traves de una Web App de Apps Script
-(apps_script/estatus_paquetes.gs, con las instrucciones dentro). Python no
-maneja credenciales de Google: solo la URL /exec y su clave, en
+(apps_script/estatus_paquetes.gs, con las instrucciones dentro), que
+tambien manda el correo diario de las 10 am. Python no maneja
+credenciales de Google: solo la URL /exec y su clave, en
 webapp_sheets.json. Al compilar, ese archivo va dentro del .exe, asi que
 el programa funciona igual en cualquier computadora y con cualquier
 usuario; uno junto al .exe tiene prioridad sobre el de adentro.
@@ -35,7 +36,6 @@ La ventana esta en estatus_app.py. Este archivo tambien se corre solo:
     python extraer_estatus_paquetes.py                  # desde 01-10-26
     python extraer_estatus_paquetes.py --desde 15-10-26
     python extraer_estatus_paquetes.py --limite 10      # prueba corta
-    python extraer_estatus_paquetes.py --solo-vacias    # no reconsultar
     python extraer_estatus_paquetes.py --ids 4800... 4801...   # sin hoja, solo CSV
 
 Requisitos:
@@ -60,22 +60,30 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
-# La hoja donde se lee y se escribe. Se le manda a la Web App en cada
-# pedido: para usar otra hoja basta cambiarla aqui
+# El archivo donde se lee y se escribe. Se le manda a la Web App en cada
+# pedido: para usar otro basta cambiarlo aqui
 SHEET_ID = "1hQvyCcWZGOo4rQcinDmWg_kYaOfZTcS3H7IZSBeaE9c"
-HOJA = "CONSOLIDADO_RTS"
-COL_ID = "C"
-COL_ESTATUS = "H"
-COL_FECHA = "I"
 
 # Solo se consultan las filas con FECHA (columna A) desde este dia
 FECHA_INICIAL = date(2026, 10, 1)
 
-# Estatus que ya no cambian: esas filas no se vuelven a consultar. Se
-# compara el inicio del texto sin acentos, asi "Entregado - Place" tambien
-# cuenta. La misma lista vive en FINALES del .gs, que lo vuelve a revisar
-# antes de escribir
-FINALES = ("entregado", "danado", "devuelto")
+ALERTA_24 = "ALERTA 24 HRS"
+ALERTA_48 = "MAYOR A 48 HRS"
+ALERTAS = (ALERTA_24, ALERTA_48)
+
+# Que hoja revisar y donde. Columnas contadas desde 0 (A = 0).
+#   estatus: la del estatus; la fecha va en la siguiente y, si hay
+#            alertas, la alerta en la que sigue a esa.
+#   finales: estatus que ya no cambian. Esas filas no se reconsultan. Se
+#            compara el inicio del texto sin acentos: "Entregado - Place"
+#            tambien cuenta. La Web App lo vuelve a revisar antes de
+#            escribir.
+HOJAS = (
+    {"nombre": "CONSOLIDADO_RTS", "id": 2, "estatus": 7,           # C, H, I
+     "finales": ("entregado", "danado", "devuelto"), "alertas": False},
+    {"nombre": "DEVOLUCIONES", "id": 3, "estatus": 4,              # D, E, F, G
+     "finales": ("devuelto",), "alertas": True},
+)
 
 URL_PAQUETE = "https://envios.adminml.com/logistics/package-management/package/"
 DOMINIO = "envios.adminml.com"
@@ -87,7 +95,7 @@ PESTANAS = 1
 ESPERA_FICHA = 30
 # Vueltas extra para las fichas que no cargaron a tiempo
 REINTENTOS = 1
-# Cada cuantos resultados se escribe en la hoja: si el programa se corta,
+# Cada cuantos cambios se escribe en la hoja: si el programa se corta,
 # lo ya escrito no se pierde
 LOTE_ESCRITURA = 25
 # Tiempo maximo para iniciar sesion en Chrome (la primera vez en una
@@ -149,9 +157,9 @@ def sin_acentos(texto):
     return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
 
 
-def es_final(estatus):
+def es_final(estatus, finales):
     t = sin_acentos(limpiar(estatus)).lower()
-    return any(t.startswith(f) for f in FINALES)
+    return any(t.startswith(f) for f in finales)
 
 
 def fecha_de(texto):
@@ -167,10 +175,23 @@ def fecha_de(texto):
         return None
 
 
+def alerta_para(fecha_fila, ahora=None):
+    """Horas desde la FECHA de la fila. La columna A no trae hora: se
+    cuenta desde las 00:00 de ese dia."""
+    ahora = ahora or datetime.now()
+    horas = (ahora - datetime(fecha_fila.year, fecha_fila.month,
+                              fecha_fila.day)).total_seconds() / 3600
+    if horas >= 48:
+        return ALERTA_48
+    if horas >= 24:
+        return ALERTA_24
+    return ""
+
+
 # ---------------------------------------------------------------- Google
 
 class WebApp:
-    """La hoja, vista a traves de la Web App de Apps Script.
+    """El archivo, visto a traves de la Web App de Apps Script.
 
     El script corre en la cuenta de Google del dueño de la hoja, asi que
     aqui no hacen falta credenciales: solo la URL /exec y la clave (TOKEN)
@@ -181,9 +202,9 @@ class WebApp:
         self.url = url
         self.token = token
 
-    def _pedir(self, metodo, cuerpo=None, extra=None):
+    def _pedir(self, metodo, hoja, cuerpo=None, extra=None):
         params = urllib.parse.urlencode(
-            {"token": self.token, "sheet": SHEET_ID, "hoja": HOJA,
+            {"token": self.token, "sheet": SHEET_ID, "hoja": hoja,
              **(extra or {})})
         datos = None
         cabeceras = {}
@@ -206,12 +227,12 @@ class WebApp:
             resp = json.loads(texto)
         except json.JSONDecodeError:
             # Suele ser la pagina de login de Google o un error del script
-            # (por ejemplo, sin permiso sobre la hoja de SHEET_ID)
+            # (por ejemplo, sin permiso sobre el archivo, o sin la pestaña)
             raise RuntimeError(
-                "La Web App no devolvio JSON. Revisa que la URL termine en "
-                "/exec, que el acceso sea 'Cualquier usuario' y que el dueño "
-                "del script pueda editar la hoja. "
-                f"Empieza con: {limpiar(texto[:100])}")
+                f"La Web App no devolvio JSON al leer {hoja}. Revisa que la "
+                "pestaña exista, que la URL termine en /exec, que el acceso "
+                "sea 'Cualquier usuario' y que el dueño del script pueda "
+                f"editar el archivo. Empieza con: {limpiar(texto[:100])}")
         if not resp.get("ok"):
             error = resp.get("error")
             if error == "token":
@@ -221,16 +242,17 @@ class WebApp:
             raise RuntimeError(f"La Web App respondio un error: {error}")
         return resp
 
-    def leer_tabla(self):
+    def leer_tabla(self, hoja):
         """Columnas A..I de cada fila, como se ven en la hoja."""
-        return self._pedir("GET", extra={"completas": "1"}).get("tabla") or []
+        return self._pedir("GET", hoja, extra={"completas": "1"}).get("tabla") or []
 
-    def escribir(self, cambios, actualizar):
-        cuerpo = {"token": self.token, "sheet": SHEET_ID, "hoja": HOJA,
+    def escribir(self, hoja, columna, finales, cambios):
+        """cambios: [{fila, valores}] desde `columna` (1 = A). None deja la
+        celda como esta."""
+        cuerpo = {"token": self.token, "sheet": SHEET_ID, "hoja": hoja,
+                  "columna": columna, "finales": list(finales),
                   "cambios": cambios}
-        if actualizar:
-            cuerpo["modo"] = "actualizar"
-        return self._pedir("POST", cuerpo)
+        return self._pedir("POST", hoja, cuerpo)
 
 
 def ruta_config():
@@ -275,73 +297,97 @@ def normalizar_id(valor):
     return digitos if len(digitos) >= 8 else ""
 
 
-def leer_pendientes(hoja, desde=FECHA_INICIAL, actualizar=True):
-    """Que filas consultar.
+def leer_pendientes(web, conf, desde=FECHA_INICIAL):
+    """Que filas de una hoja consultar.
 
-    desde: solo filas con FECHA (columna A) desde ese dia. None = todas.
-    actualizar: True consulta tambien las que ya tienen un estatus que aun
-    puede cambiar; False solo las que tienen H e I vacias.
-
-    Devuelve ({id: {fila: (estatus_actual, fecha_actual)}}, cuentas): un
-    mismo paquete puede estar en varias filas y basta consultarlo una vez.
+    Devuelve (pendientes, limpiezas, cuentas):
+      pendientes: {id: [fila]}, cada fila un dict con su numero y lo que
+                  dice hoy. Un paquete puede estar en varias filas.
+      limpiezas:  filas ya finales que todavia muestran una alerta vieja
+                  (alguien las marco a mano): solo se les borra la alerta.
     """
-    tabla = hoja.leer_tabla()
+    tabla = web.leer_tabla(conf["nombre"])
+    c_est = conf["estatus"]
 
-    pendientes = {}
-    cuentas = {"en_rango": 0, "finales": 0, "con_dato": 0, "fuera": 0}
+    pendientes, limpiezas = {}, []
+    cuentas = {"en_rango": 0, "finales": 0, "fuera": 0}
     for n, fila in enumerate(tabla, start=1):
         fila = list(fila) + [""] * (9 - len(fila))
-        pid = normalizar_id(fila[2])            # C
+        pid = normalizar_id(fila[conf["id"]])
         if not pid:
             continue
-        if desde:
-            f = fecha_de(fila[0])               # A
-            if not f or f < desde:
-                cuentas["fuera"] += 1
-                continue
+        f = fecha_de(fila[0])                    # A
+        if desde and (not f or f < desde):
+            cuentas["fuera"] += 1
+            continue
         cuentas["en_rango"] += 1
-        estatus, fecha = limpiar(fila[7]), limpiar(fila[8])     # H, I
-        if es_final(estatus):
+        actual = {"fila": n, "fecha_fila": f,
+                  "estatus": limpiar(fila[c_est]),
+                  "fecha": limpiar(fila[c_est + 1]),
+                  "obs": limpiar(fila[c_est + 2]) if conf["alertas"] else ""}
+        if es_final(actual["estatus"], conf["finales"]):
             cuentas["finales"] += 1
+            if conf["alertas"] and actual["obs"] in ALERTAS:
+                limpiezas.append({"fila": n, "valores": [None, None, ""]})
             continue
-        if not actualizar and (estatus or fecha):
-            cuentas["con_dato"] += 1
-            continue
-        pendientes.setdefault(pid, {})[n] = (estatus, fecha)
+        pendientes.setdefault(pid, []).append(actual)
 
     filas = sum(len(v) for v in pendientes.values())
     desde_txt = f"desde {desde:%d-%m-%y}" if desde else "de todas las fechas"
-    log(f"Hoja: {cuentas['en_rango']} filas {desde_txt}; "
-        f"{filas} por consultar ({len(pendientes)} paquetes distintos).")
+    log(f"{conf['nombre']}: {cuentas['en_rango']} filas {desde_txt}; "
+        f"{filas} por consultar ({len(pendientes)} paquetes).")
     if cuentas["finales"]:
-        log(f"  {cuentas['finales']} filas con estatus final "
-            f"({', '.join(FINALES)}) no se vuelven a consultar.")
-    if cuentas["con_dato"]:
-        log(f"  {cuentas['con_dato']} filas ya tenian dato y se respetan.")
-    return pendientes, cuentas
+        log(f"  {cuentas['finales']} filas ya en estatus final "
+            f"({', '.join(conf['finales'])}) no se reconsultan.")
+    return pendientes, limpiezas, cuentas
 
 
-def escribir(hoja, resultados, actualizar=True):
-    """resultados: [(fila, estatus, fecha)]. Solo toca H:I de esas filas.
+def cambio_de_fila(conf, actual, nuevo):
+    """Lo que hay que escribir en una fila, o None si nada cambia.
 
-    La Web App vuelve a mirar cada fila antes de escribir: nunca pisa un
-    estatus final, y en modo solo-vacias tampoco una fila con dato.
+    nuevo: (estatus, fecha) leidos del panel, o None si no se pudo ver el
+    paquete; en ese caso solo puede cambiar la alerta.
     """
-    if hoja is None or not resultados:
+    valores = [None, None]
+    estatus = actual["estatus"]
+    if nuevo:
+        estatus, fecha = nuevo
+        if (estatus, fecha) != (actual["estatus"], actual["fecha"]):
+            valores = [estatus, fecha]
+
+    if conf["alertas"]:
+        obs = None
+        # Nunca se pisa una nota escrita a mano: solo se escribe en G si
+        # esta vacia o si tiene una alerta de este programa
+        if actual["obs"] in ("",) + ALERTAS and actual["fecha_fila"]:
+            alerta = ("" if es_final(estatus, conf["finales"])
+                      else alerta_para(actual["fecha_fila"]))
+            if alerta != actual["obs"]:
+                obs = alerta
+        valores.append(obs)
+
+    if all(v is None for v in valores):
+        return None
+    return {"fila": actual["fila"], "valores": valores}
+
+
+def escribir(web, conf, cambios):
+    """Manda a la hoja los cambios de una de las pestañas."""
+    if web is None or not cambios:
         return
-    cambios = [{"fila": fila, "estatus": estatus, "fecha": fecha}
-               for fila, estatus, fecha in resultados]
     for intento in range(3):
         try:
-            resp = hoja.escribir(cambios, actualizar)
+            resp = web.escribir(conf["nombre"], conf["estatus"] + 1,
+                                conf["finales"], cambios)
             if resp.get("omitidas"):
-                log(f"  {resp['omitidas']} filas cambiaron en la hoja mientras "
-                    "corria el programa; no se tocaron.")
+                log(f"  {conf['nombre']}: {resp['omitidas']} filas cambiaron "
+                    "en la hoja mientras corria el programa; no se tocaron.")
             return
         except Exception as e:
             if intento == 2 or "clave" in str(e):
                 raise
-            log(f"  Fallo al escribir en la hoja ({str(e)[:80]}); reintentando...")
+            log(f"  Fallo al escribir en {conf['nombre']} ({str(e)[:80]}); "
+                "reintentando...")
             time.sleep(5 * (intento + 1))
 
 
@@ -657,74 +703,97 @@ def guardar_respaldo(filas):
     ruta = os.path.join(BASE_DIR, f"estatus_paquetes_{sello}.csv")
     with open(ruta, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f, delimiter=";")
-        w.writerow(["ID PAQUETE", "FILAS", "ESTATUS", "FECHA", "RESULTADO"])
+        w.writerow(["ID PAQUETE", "HOJA:FILAS", "ESTATUS", "FECHA", "RESULTADO"])
         w.writerows(filas)
     return ruta
 
 
-def ejecutar(desde=FECHA_INICIAL, actualizar=True, pestanas=PESTANAS,
-             limite=0, ids=None, detener=None):
-    """La corrida completa: hoja -> panel -> hoja. La usan la ventana y la
-    linea de comando.
+def ejecutar(desde=FECHA_INICIAL, pestanas=PESTANAS, limite=0, ids=None,
+             detener=None):
+    """La corrida completa: hojas -> panel -> hojas. La usan la ventana y
+    la linea de comando.
+
+    Un paquete que esta en las dos hojas se consulta una sola vez.
 
     ids: lista de ids para consultar sin tocar la hoja (solo CSV).
     detener: threading.Event; si se activa, se para y se guarda lo hecho.
 
     Devuelve un resumen (dict) para mostrar.
     """
-    resumen = {"consultados": 0, "ok": 0, "cambiaron": 0, "iguales": 0,
+    resumen = {"consultados": 0, "ok": 0, "cambiaron": 0,
                "sin_paquete": 0, "sin_respuesta": 0, "finales": 0,
+               "alerta_24": 0, "alerta_48": 0,
                "conteo": {}, "respaldo": "", "minutos": 0.0, "error": ""}
 
-    hoja = None
+    web = None
+    # id -> [(conf, fila_actual)]
+    pendientes = {}
+    # nombre de hoja -> cambios por mandar
+    buzon = {conf["nombre"]: [] for conf in HOJAS}
+    conf_de = {conf["nombre"]: conf for conf in HOJAS}
+
     if ids:
-        pendientes = {}
         for valor in ids:
             pid = normalizar_id(valor)
             if pid:
-                pendientes.setdefault(pid, {})
+                pendientes.setdefault(pid, [])
         log(f"Sin hoja de calculo: {len(pendientes)} ids, solo CSV.")
     else:
         log("Leyendo la hoja de calculo...")
-        hoja = abrir_hoja()
-        pendientes, cuentas = leer_pendientes(hoja, desde, actualizar)
-        resumen["finales"] = cuentas["finales"]
+        web = abrir_hoja()
+        for conf in HOJAS:
+            p, limpiezas, cuentas = leer_pendientes(web, conf, desde)
+            resumen["finales"] += cuentas["finales"]
+            buzon[conf["nombre"]].extend(limpiezas)
+            for pid, filas in p.items():
+                pendientes.setdefault(pid, []).extend((conf, f) for f in filas)
+
+    def vaciar(forzar=False):
+        for nombre, cambios in buzon.items():
+            if cambios and (forzar or len(cambios) >= LOTE_ESCRITURA):
+                escribir(web, conf_de[nombre], cambios)
+                cambios.clear()
 
     lista = list(pendientes)
     if limite:
         lista = lista[:limite]
     if not lista:
         log("No hay paquetes por consultar.")
+        vaciar(forzar=True)
         return resumen
 
-    por_escribir = []
     respaldo = []
     conteo = resumen["conteo"]
 
     def al_terminar(pid, estado, dato):
         filas = pendientes[pid]
-        nums = ",".join(map(str, filas))
         resumen["consultados"] += 1
-        if estado == "ok":
-            estatus, fecha = dato
+        donde = ",".join(f"{c['nombre']}:{f['fila']}" for c, f in filas)
+        nuevo = dato if estado == "ok" else None
+        if nuevo:
             resumen["ok"] += 1
-            conteo[estatus] = conteo.get(estatus, 0) + 1
-            for fila, (antes_e, antes_f) in filas.items():
-                # Solo se manda lo que cambio: una fila que ya dice lo mismo
-                # no gasta una escritura
-                if (antes_e, antes_f) == (estatus, fecha):
-                    resumen["iguales"] += 1
-                else:
-                    resumen["cambiaron"] += 1
-                    por_escribir.append((fila, estatus, fecha))
-            respaldo.append([pid, nums, estatus, fecha, "ok"])
+            conteo[nuevo[0]] = conteo.get(nuevo[0], 0) + 1
+            respaldo.append([pid, donde, nuevo[0], nuevo[1], "ok"])
         else:
-            # No se escribe nada en la hoja: la proxima corrida lo reintenta
-            resumen[estado if estado == "sin_respuesta" else "sin_paquete"] += 1
-            respaldo.append([pid, nums, "", "", dato or estado])
-        if len(por_escribir) >= LOTE_ESCRITURA:
-            escribir(hoja, por_escribir, actualizar)
-            por_escribir.clear()
+            # Sin dato del panel la fila conserva su estatus; solo puede
+            # cambiar la alerta
+            resumen["sin_respuesta" if estado == "sin_respuesta"
+                    else "sin_paquete"] += 1
+            respaldo.append([pid, donde, "", "", dato or estado])
+
+        for conf, actual in filas:
+            cambio = cambio_de_fila(conf, actual, nuevo)
+            if conf["alertas"]:
+                g = cambio["valores"][2] if cambio else None
+                alerta = actual["obs"] if g is None else g
+                if alerta == ALERTA_24:
+                    resumen["alerta_24"] += 1
+                elif alerta == ALERTA_48:
+                    resumen["alerta_48"] += 1
+            if cambio:
+                resumen["cambiaron"] += 1
+                buzon[conf["nombre"]].append(cambio)
+        vaciar()
 
     log("Abriendo Chrome...")
     driver = crear_driver()
@@ -743,10 +812,10 @@ def ejecutar(desde=FECHA_INICIAL, actualizar=True, pestanas=PESTANAS,
         log(f"ERROR: {e}")
     finally:
         try:
-            escribir(hoja, por_escribir, actualizar)
+            vaciar(forzar=True)
         except Exception as e:
             resumen["error"] = resumen["error"] or str(e)
-            log(f"ERROR al escribir las ultimas {len(por_escribir)} filas: {e}")
+            log(f"ERROR al escribir los ultimos cambios: {e}")
         log("Cerrando Chrome...")
         cerrar_driver(driver)
 
@@ -761,8 +830,6 @@ def main():
                     metavar="DD-MM-AA",
                     help="solo filas con FECHA desde ese dia "
                          f"(defecto {FECHA_INICIAL:%d-%m-%y}); 'todas' = sin filtro")
-    ap.add_argument("--solo-vacias", action="store_true",
-                    help="consultar solo filas sin estatus (no reconsultar)")
     ap.add_argument("--pestanas", type=int, default=PESTANAS,
                     help=f"pestañas en paralelo (defecto {PESTANAS})")
     ap.add_argument("--limite", type=int, default=0,
@@ -795,8 +862,7 @@ def main():
     print("  ULTIMO ESTATUS DE PAQUETES - MERCADO LIBRE ENVIOS")
     print("=" * 70)
     try:
-        r = ejecutar(desde, not args.solo_vacias, args.pestanas,
-                     args.limite, ids)
+        r = ejecutar(desde, args.pestanas, args.limite, ids)
     except Exception as e:
         log(f"ERROR: {e}")
         return
@@ -805,7 +871,9 @@ def main():
     print("=" * 70)
     print(f"  LISTO. {r['ok']}/{r['consultados']} paquetes con estatus "
           f"en {r['minutos']:.1f} min.")
-    print(f"  Filas que cambiaron: {r['cambiaron']}   sin cambio: {r['iguales']}")
+    print(f"  Filas actualizadas: {r['cambiaron']}")
+    print(f"  Devoluciones: {r['alerta_48']} mayores a 48 hrs, "
+          f"{r['alerta_24']} con alerta de 24 hrs")
     if r["finales"]:
         print(f"  Filas con estatus final, no consultadas: {r['finales']}")
     print()

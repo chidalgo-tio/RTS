@@ -11,7 +11,7 @@ llevó hasta ellos.
 | **`CasosPNR.exe`** | Reclamos PNR del período: driver, paquete, monto | ~10 s |
 | **`CapacidadMeli.exe`** | Pedidos de vehículos por estación y tipo | ~1 s/día |
 | **`MapasMeli.exe`** | Paradas de cada ruta con sus coordenadas | ~1 min/día |
-| **`Extractor_RTS.exe`** | Último estatus de cada paquete RTS, escrito en la hoja | ~2 s/paquete |
+| **`Extractor_RTS.exe`** | Estatus de RTS y devoluciones en la hoja, con alertas y correo diario | ~2 s/paquete |
 
 ## `DriversMeli.exe` — el padrón
 
@@ -336,23 +336,42 @@ de la `RUTA` (C1_AM1) se lee del HTML de cada ficha, en lotes paralelos.
 
 ---
 
-## `Extractor_RTS.exe` — el estatus de los RTS
+## `Extractor_RTS.exe` — RTS y devoluciones
 
 ```
 Paquetes con FECHA desde [01/10/2026 ▾]
 [ ACTUALIZAR ESTATUS ]  [ DETENER ]
 ```
 
-Lee la hoja **CONSOLIDADO_RTS** (ids en la columna C), abre la ficha de
-cada paquete en el panel y escribe el primer estado del *Historial del
-paquete* —el más reciente— en **H** y su fecha en **I**
-(`21/09/2026 14:20`).
+Revisa dos pestañas del archivo *INVENTARIO XPT SMA*, solo las filas con
+FECHA (columna A) desde el día elegido, y escribe el primer estado del
+*Historial del paquete* —el más reciente— con su fecha (`21/09/2026 14:20`):
 
-**Qué filas toca**: solo las de FECHA (columna A) desde el día elegido, y
-de esas, las que no tienen estatus o tienen uno que todavía puede cambiar.
-Las que dicen **Entregado, Dañado o Devuelto** ya no se consultan ni se
-tocan (cuenta el inicio del texto: *Entregado - Place* también). Así la
-primera corrida llena todo y las siguientes solo refrescan lo vivo.
+| Pestaña | ID | Escribe | No reconsulta |
+|---|---|---|---|
+| **CONSOLIDADO_RTS** | C | estatus en **H**, fecha en **I** | Entregado, Dañado, Devuelto |
+| **DEVOLUCIONES** | D | estatus en **E**, fecha en **F**, alerta en **G** | Devuelto |
+
+Cuenta el inicio del texto: *Entregado - Place* también es final. Un
+paquete que está en las dos pestañas se consulta una sola vez.
+
+**Alertas de DEVOLUCIONES** (columna G), mientras no esté en Devuelto:
+
+| Desde la FECHA de la fila | G |
+|---|---|
+| 24 horas o más | `ALERTA 24 HRS` |
+| 48 horas o más | `MAYOR A 48 HRS` |
+
+La columna A no trae hora: se cuenta desde las 00:00 de ese día. Al pasar
+a Devuelto la alerta se borra. **Una nota escrita a mano en G no se pisa**:
+esa fila se queda sin alerta.
+
+**Correo de las 10 am**: lo manda Apps Script todos los días (no hace falta
+ninguna computadora prendida) a `DESTINATARIOS`, al inicio del `.gs`. Trae
+las devoluciones que no están en Devuelto, primero las de más de 48 horas,
+y todo CONSOLIDADO_RTS con un resumen por estatus; adjunta los dos en CSV.
+Refleja lo que diga la hoja a esa hora: conviene correr el extractor antes.
+Se programa una vez ejecutando `instalarCorreoDiario()` en el editor.
 
 **Cualquiera lo puede correr, en cualquier PC con Windows y Chrome**: no
 pide cuenta de Google. Escribe a través de una Web App de Apps Script que
@@ -361,8 +380,8 @@ Lo único que pide es iniciar sesión en Mercado Libre la primera vez, en la
 ventana de Chrome que abre.
 
 **El SC importa**: el panel solo muestra los paquetes del SC elegido en
-"Estás viendo". Los de otro SC salen como *no se vieron* y su fila no se
-toca.
+"Estás viendo". Los de otro SC salen como *no se vieron* y su estatus no
+se toca.
 
 **El `.exe` no está en el repo**: lleva la clave de la Web App y el repo es
 público. Se reparte aparte. Para compilarlo hace falta
@@ -373,8 +392,9 @@ pyinstaller --onefile --windowed --name Extractor_RTS ^
     --collect-all selenium --add-data "webapp_sheets.json;." estatus_app.py
 ```
 
-La Web App está en `apps_script/estatus_paquetes.gs`, con la instalación
-explicada arriba del archivo. La hoja se elige en `SHEET_ID`, al inicio de
+La Web App y el correo están en `apps_script/estatus_paquetes.gs`, con la
+instalación explicada arriba del archivo. El archivo se elige en
+`SHEET_ID` y las pestañas en `HOJAS`, al inicio de
 `extraer_estatus_paquetes.py`.
 
 ## Requisitos

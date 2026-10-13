@@ -2,12 +2,14 @@
 """
 Estatus de paquetes - Interfaz grafica
 
-Un solo boton: lee la hoja CONSOLIDADO_RTS, consulta en Mercado Libre el
-ultimo estatus de cada paquete desde la fecha elegida (01-10-26 por
-defecto) y lo escribe en las columnas H e I.
+Un solo boton: lee las hojas CONSOLIDADO_RTS y DEVOLUCIONES, consulta en
+Mercado Libre el ultimo estatus de cada paquete desde la fecha elegida
+(01-10-26 por defecto) y lo escribe en la hoja.
 
-La primera vez llena todo; las siguientes solo reconsultan los paquetes
-cuyo estatus aun puede cambiar (todo menos Entregado, Dañado y Devuelto).
+  CONSOLIDADO_RTS: estatus en H, fecha en I. No reconsulta Entregado,
+                   Dañado ni Devuelto.
+  DEVOLUCIONES:    estatus en E, fecha en F y alerta de 24/48 horas en G.
+                   Reconsulta todo lo que no este en Devuelto.
 
 Compilar (ver LEEME.md):
     pyinstaller --onefile --windowed --name Extractor_RTS ^
@@ -129,9 +131,10 @@ class Ventana(QMainWindow):
         fila.addStretch()
         raiz.addLayout(fila)
 
-        nota = QLabel(f"Hoja {nucleo.HOJA}: lee la columna C y escribe estatus "
-                      "en H y fecha en I. No reconsulta los Entregado, Dañado "
-                      "ni Devuelto.")
+        nota = QLabel("CONSOLIDADO_RTS: estatus en H y fecha en I (no reconsulta "
+                      "Entregado, Dañado ni Devuelto).  DEVOLUCIONES: estatus "
+                      "en E, fecha en F y alerta de 24/48 hrs en G (reconsulta "
+                      "todo lo que no este en Devuelto).")
         nota.setWordWrap(True)
         nota.setStyleSheet(f"color: {SUAVE}; font-family: {FUENTE};"
                            f" font-size: 10px;")
@@ -155,9 +158,9 @@ class Ventana(QMainWindow):
         self.t_consultados = Tarjeta("Consultados", TEXTO)
         self.t_cambiaron = Tarjeta("Filas cambiadas", AMARILLO)
         self.t_finales = Tarjeta("Finales (no se tocan)", VERDE)
-        self.t_sin_ver = Tarjeta("No se vieron", ROJO)
-        for t in (self.t_consultados, self.t_cambiaron, self.t_finales,
-                  self.t_sin_ver):
+        self.t_alertas = Tarjeta("Dev. +48 h / +24 h", ROJO)
+        self.t_sin_ver = Tarjeta("No se vieron", SUAVE)
+        for t in self._tarjetas():
             tarjetas.addWidget(t)
         raiz.addLayout(tarjetas)
 
@@ -179,6 +182,10 @@ class Ventana(QMainWindow):
         pie.addWidget(self.b_carpeta)
         pie.addStretch()
         raiz.addLayout(pie)
+
+    def _tarjetas(self):
+        return (self.t_consultados, self.t_cambiaron, self.t_finales,
+                self.t_alertas, self.t_sin_ver)
 
     def _hilo(self):
         self.puente = Puente()
@@ -205,8 +212,7 @@ class Ventana(QMainWindow):
         self.b_detener.setEnabled(si)
 
     def al_actualizar(self):
-        for t in (self.t_consultados, self.t_cambiaron, self.t_finales,
-                  self.t_sin_ver):
+        for t in self._tarjetas():
             t.poner("-")
         self._ocupado(True)
         desde = self.desde.date().toPython()
@@ -228,6 +234,7 @@ class Ventana(QMainWindow):
         self.t_consultados.poner(r["consultados"])
         self.t_cambiaron.poner(r["cambiaron"])
         self.t_finales.poner(r["finales"])
+        self.t_alertas.poner(f"{r['alerta_48']} / {r['alerta_24']}")
         self.t_sin_ver.poner(r["sin_paquete"] + r["sin_respuesta"])
 
         if r["error"]:
@@ -260,8 +267,9 @@ class Ventana(QMainWindow):
         QMessageBox.information(
             self, "Listo",
             f"{r['ok']} paquetes con estatus\n"
-            f"{r['cambiaron']} filas actualizadas en la hoja, "
-            f"{r['iguales']} sin cambio\n\n{detalle}{aviso}")
+            f"{r['cambiaron']} filas actualizadas en la hoja\n"
+            f"Devoluciones: {r['alerta_48']} mayores a 48 hrs, "
+            f"{r['alerta_24']} con alerta de 24 hrs\n\n{detalle}{aviso}")
 
     def al_fallar(self, mensaje):
         self._ocupado(False)
