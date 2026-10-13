@@ -44,6 +44,9 @@ const HORA_CORREO = 10;
 const ZONA = 'America/Mexico_City';
 // El reporte cubre las filas con FECHA (columna A) desde este dia
 const DESDE_REPORTE = new Date(2026, 9, 1);   // 01/10/2026 (mes 0 = enero)
+// RTS que no van en el correo: ya estan cerrados. Inicio del texto sin
+// acentos, asi "Entregado - Place" cuenta como "entregado"
+const RTS_FUERA_DEL_CORREO = ['entregado', 'devuelto', 'destruccion'];
 
 // DEVOLUCIONES: A fecha, B motivo, C zona, D id, E estatus, F fecha del
 // estatus, G fecha de revision, H observaciones (las alertas)
@@ -239,9 +242,9 @@ function asegurarColores_(hoja) {
 // ------------------------------------------------------------ Reporte
 
 /**
- * El correo de las 10 am: todos los RTS desde DESDE_REPORTE, y las
- * devoluciones de ese periodo con alerta de 24 o 48 horas en la columna
- * H. Lo dispara el activador de instalarCorreoDiario(); tambien se puede
+ * El correo de las 10 am: los RTS desde DESDE_REPORTE que siguen
+ * abiertos (no Entregado, Devuelto ni Destruccion), y las devoluciones de
+ * ese periodo con alerta de 24 o 48 horas en la columna H. Lo dispara el activador de instalarCorreoDiario(); tambien se puede
  * ejecutar a mano para probar.
  */
 function enviarReporte() {
@@ -259,8 +262,10 @@ function armarReporte_() {
   const hoy = Utilities.formatDate(new Date(), ZONA, 'dd/MM/yyyy');
 
   // CONSOLIDADO_RTS: A fecha, C id, D usuario, E motivo, H estatus, I fecha
-  const rts = filasDesde_(libro.getSheetByName(HOJA))
+  const rtsTodas = filasDesde_(libro.getSheetByName(HOJA))
     .map(f => [f[0], f[2], f[3], f[4], f[7] || 'Sin consultar', f[8]]);
+  const rts = rtsTodas.filter(f => !esFinal_(f[4], RTS_FUERA_DEL_CORREO));
+  const cerrados = rtsTodas.length - rts.length;
 
   // DEVOLUCIONES con alerta en H: primero las de 48 horas
   const orden = {};
@@ -284,7 +289,9 @@ function armarReporte_() {
     '<p style="margin:0 0 14px;color:#555">Filas con fecha desde ' +
     Utilities.formatDate(DESDE_REPORTE, ZONA, 'dd/MM/yyyy') + '. ' +
     'Estatus tomado de Mercado Libre por Extractor_RTS.</p>' +
-    '<h3 style="margin:16px 0 4px">CONSOLIDADO_RTS: ' + rts.length + '</h3>' +
+    '<h3 style="margin:16px 0 4px">CONSOLIDADO_RTS abiertos: ' + rts.length + '</h3>' +
+    '<p style="margin:0 0 6px;color:#555">No se listan ' + cerrados +
+    ' ya cerrados (Entregado, Entregado - Place, Devuelto o Destrucción).</p>' +
     resumenHtml_(rts, 4) +
     tablaHtml_(cabRts, rts, -1) +
     '<h3 style="margin:22px 0 4px">DEVOLUCIONES con alerta: ' + dev.length + '</h3>' +
@@ -297,7 +304,7 @@ function armarReporte_() {
 
   // Los mismos datos en CSV, por si el correo se recorta
   const adjuntos = [
-    Utilities.newBlob(csv_(cabRts, rts), 'text/csv', 'consolidado_rts.csv'),
+    Utilities.newBlob(csv_(cabRts, rts), 'text/csv', 'consolidado_rts_abiertos.csv'),
     Utilities.newBlob(csv_(cabDev, dev), 'text/csv', 'devoluciones_con_alerta.csv'),
   ];
 

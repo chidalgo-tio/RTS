@@ -372,8 +372,10 @@ se queda sin alerta.
 
 **Correo de las 10 am**: lo manda Apps Script todos los días (no hace falta
 ninguna computadora prendida) a `DESTINATARIOS`, al inicio del `.gs`. Trae
-todo CONSOLIDADO_RTS con un resumen por estatus, y las devoluciones con
-alerta en H, primero las de más de 48 horas; adjunta los dos en CSV. La
+los RTS de CONSOLIDADO_RTS que siguen abiertos (no lista los Entregado,
+Entregado - Place, Devuelto ni Destrucción; avisa cuántos son) con un
+resumen por estatus, y las devoluciones con alerta en H, primero las de
+más de 48 horas; adjunta los dos en CSV. La
 Web App lo muestra sin mandarlo con `?vista=correo`.
 Refleja lo que diga la hoja a esa hora: conviene correr el extractor antes.
 Se programa una vez ejecutando `instalarCorreoDiario()` en el editor.
