@@ -6,6 +6,7 @@
  *
  *   GET  ?token=&hoja=&completas=1   -> las columnas A..I como se ven
  *   GET  ?token=&vista=correo        -> el correo de hoy, sin mandarlo
+ *   GET  ?token=&accion=enviar       -> lo manda ya (siempre a DESTINATARIOS)
  *   POST {token, hoja, columna, finales, cambios:[{fila, valores}]}
  *        -> escribe valores desde esa columna (null = no tocar la celda)
  *
@@ -88,6 +89,13 @@ function instalarCorreoDiario() {
 
 function doGet(e) {
   if (!autorizado_(e.parameter.token)) return responder_({ok: false, error: 'token'});
+
+  // Mandarlo en el momento, para probar. Solo a DESTINATARIOS: la clave
+  // no permite elegir a quien
+  if (e.parameter.accion === 'enviar') {
+    enviarReporte();
+    return responder_({ok: true, enviado: DESTINATARIOS});
+  }
 
   // Vista previa: el correo tal como saldria hoy, sin mandarlo
   if (e.parameter.vista === 'correo') {
