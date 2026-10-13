@@ -54,9 +54,11 @@ const RTS_FUERA_DEL_CORREO = ['entregado', 'devuelto', 'destruccion'];
 const COL_OBS_DEV = 8;  // H
 const ALERTA_24 = 'ALERTA 24 HRS';
 const ALERTA_48 = 'MAYOR A 48 HRS';
-// Colores de las alertas en la hoja y en el correo
+// Colores de las alertas en la hoja; el naranja tambien en el correo
 const NARANJA = '#ffb74d';
 const ROJO = '#e53935';
+// En el correo la alerta de 48 horas va en rojo tinto, con letra blanca
+const TINTO = '#8b0000';
 
 // Formato viejo de los .exe anteriores: estatus en H, fecha en I
 const COL_ID = 3;       // C
@@ -303,7 +305,7 @@ function armarReporte_() {
     resumenHtml_(rts, 4) +
     tablaHtml_(cabRts, rts, -1) +
     '<h3 style="margin:22px 0 4px">DEVOLUCIONES con alerta: ' + dev.length + '</h3>' +
-    '<p style="margin:0 0 6px"><span style="background:' + ROJO +
+    '<p style="margin:0 0 6px"><span style="background:' + TINTO +
     ';color:#fff;padding:1px 6px;font-weight:bold">Mayor a 48 hrs: ' + a48 +
     '</span> &nbsp; <span style="background:' + NARANJA +
     ';padding:1px 6px;font-weight:bold">Alerta 24 hrs: ' + a24 + '</span></p>' +
@@ -364,7 +366,7 @@ function tablaHtml_(cabecera, filas, colAlerta) {
     // la hoja
     h += '<tr>' + f.map((v, i) => {
       let fondo = '';
-      if (i === colAlerta && v === ALERTA_48) fondo = 'background:' + ROJO + ';color:#fff;font-weight:bold;';
+      if (i === colAlerta && v === ALERTA_48) fondo = 'background:' + TINTO + ';color:#fff;font-weight:bold;';
       else if (i === colAlerta && v === ALERTA_24) fondo = 'background:' + NARANJA + ';font-weight:bold;';
       return '<td style="' + fondo + td + '">' + esc_(v) + '</td>';
     }).join('') + '</tr>';
