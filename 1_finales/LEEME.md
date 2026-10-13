@@ -350,26 +350,31 @@ FECHA (columna A) desde el día elegido, y escribe el primer estado del
 | Pestaña | ID | Escribe | No reconsulta |
 |---|---|---|---|
 | **CONSOLIDADO_RTS** | C | estatus en **H**, fecha en **I** | Entregado, Dañado, Devuelto |
-| **DEVOLUCIONES** | D | estatus en **E**, fecha en **F**, alerta en **G** | Devuelto |
+| **DEVOLUCIONES** | D | estatus en **E**, fecha en **F**, revisión en **G**, alerta en **H** | Devuelto |
 
 Cuenta el inicio del texto: *Entregado - Place* también es final. Un
 paquete que está en las dos pestañas se consulta una sola vez.
 
-**Alertas de DEVOLUCIONES** (columna G), mientras no esté en Devuelto:
+**Alertas de DEVOLUCIONES**: G guarda cuándo se revisó la fila (la hora
+de la corrida) y H la alerta, según las horas entre la FECHA (A) y esa
+revisión:
 
-| Desde la FECHA de la fila | G |
-|---|---|
-| 24 horas o más | `ALERTA 24 HRS` |
-| 48 horas o más | `MAYOR A 48 HRS` |
+| Desde la FECHA de la fila | H | Color |
+|---|---|---|
+| 24 horas o más | `ALERTA 24 HRS` | naranja |
+| 48 horas o más | `MAYOR A 48 HRS` | rojo |
 
-La columna A no trae hora: se cuenta desde las 00:00 de ese día. Al pasar
-a Devuelto la alerta se borra. **Una nota escrita a mano en G no se pisa**:
-esa fila se queda sin alerta.
+No llevan alerta los que están en **Devuelto, Entregado, Entregado - Place
+o Destrucción**. La columna A no trae hora: se cuenta desde las 00:00 de
+ese día. Los colores son formato condicional en H, que la Web App agrega
+sola la primera vez. **Una nota escrita a mano en H no se pisa**: esa fila
+se queda sin alerta.
 
 **Correo de las 10 am**: lo manda Apps Script todos los días (no hace falta
 ninguna computadora prendida) a `DESTINATARIOS`, al inicio del `.gs`. Trae
-las devoluciones que no están en Devuelto, primero las de más de 48 horas,
-y todo CONSOLIDADO_RTS con un resumen por estatus; adjunta los dos en CSV.
+todo CONSOLIDADO_RTS con un resumen por estatus, y las devoluciones con
+alerta en H, primero las de más de 48 horas; adjunta los dos en CSV. La
+Web App lo muestra sin mandarlo con `?vista=correo`.
 Refleja lo que diga la hoja a esa hora: conviene correr el extractor antes.
 Se programa una vez ejecutando `instalarCorreoDiario()` en el editor.
 

@@ -8,7 +8,9 @@ Mercado Libre el ultimo estatus de cada paquete desde la fecha elegida
 
   CONSOLIDADO_RTS: estatus en H, fecha en I. No reconsulta Entregado,
                    Dañado ni Devuelto.
-  DEVOLUCIONES:    estatus en E, fecha en F y alerta de 24/48 horas en G.
+  DEVOLUCIONES:    estatus en E, fecha en F, revision en G y alerta de
+                   24/48 horas en H (no si esta Devuelto, Entregado o en
+                   Destruccion).
                    Reconsulta todo lo que no este en Devuelto.
 
 Compilar (ver LEEME.md):
@@ -133,7 +135,7 @@ class Ventana(QMainWindow):
 
         nota = QLabel("CONSOLIDADO_RTS: estatus en H y fecha en I (no reconsulta "
                       "Entregado, Dañado ni Devuelto).  DEVOLUCIONES: estatus "
-                      "en E, fecha en F y alerta de 24/48 hrs en G (reconsulta "
+                      "en E, fecha en F, revision en G y alerta de 24/48 hrs en H (reconsulta "
                       "todo lo que no este en Devuelto).")
         nota.setWordWrap(True)
         nota.setStyleSheet(f"color: {SUAVE}; font-family: {FUENTE};"

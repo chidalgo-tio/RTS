@@ -5,11 +5,12 @@
  * DEVOLUCIONES, para que Python no necesite credenciales de Google:
  *
  *   GET  ?token=&hoja=&completas=1   -> las columnas A..I como se ven
+ *   GET  ?token=&vista=correo        -> el correo de hoy, sin mandarlo
  *   POST {token, hoja, columna, finales, cambios:[{fila, valores}]}
  *        -> escribe valores desde esa columna (null = no tocar la celda)
  *
  * Ademas, enviarReporte() manda todos los dias a las 10 am el reporte de
- * los RTS y de las devoluciones que aun no estan en DEVUELTO.
+ * los RTS y de las devoluciones con alerta de 24 o 48 horas.
  *
  * Instalacion (una sola vez):
  *   1. En la hoja: Extensiones > Apps Script. Pega este archivo.
@@ -44,6 +45,15 @@ const ZONA = 'America/Mexico_City';
 // El reporte cubre las filas con FECHA (columna A) desde este dia
 const DESDE_REPORTE = new Date(2026, 9, 1);   // 01/10/2026 (mes 0 = enero)
 
+// DEVOLUCIONES: A fecha, B motivo, C zona, D id, E estatus, F fecha del
+// estatus, G fecha de revision, H observaciones (las alertas)
+const COL_OBS_DEV = 8;  // H
+const ALERTA_24 = 'ALERTA 24 HRS';
+const ALERTA_48 = 'MAYOR A 48 HRS';
+// Colores de las alertas en la hoja y en el correo
+const NARANJA = '#ffb74d';
+const ROJO = '#e53935';
+
 // Formato viejo de los .exe anteriores: estatus en H, fecha en I
 const COL_ID = 3;       // C
 const COL_ESTATUS = 8;  // H
@@ -75,6 +85,13 @@ function instalarCorreoDiario() {
 
 function doGet(e) {
   if (!autorizado_(e.parameter.token)) return responder_({ok: false, error: 'token'});
+
+  // Vista previa: el correo tal como saldria hoy, sin mandarlo
+  if (e.parameter.vista === 'correo') {
+    const r = armarReporte_();
+    return responder_({ok: true, para: DESTINATARIOS, asunto: r.asunto,
+                       html: r.html});
+  }
 
   const hoja = abrirHoja_(e.parameter.sheet, e.parameter.hoja);
   const ultima = hoja.getLastRow();
@@ -108,6 +125,7 @@ function doPost(e) {
   candado.waitLock(30000);
   try {
     const hoja = abrirHoja_(datos.sheet, datos.hoja);
+    if (hoja.getName() === HOJA_DEV) asegurarColores_(hoja);
     const r = datos.columna ? escribirColumnas_(hoja, datos)
                             : escribirViejo_(hoja, datos);
     SpreadsheetApp.flush();
@@ -194,15 +212,49 @@ function esFinal_(estatus, finales) {
   return (finales || FINALES).some(f => t.indexOf(f) === 0);
 }
 
+/**
+ * Pinta las alertas de la columna H de DEVOLUCIONES: naranja la de 24
+ * horas, rojo la de 48. Con formato condicional, asi se pintan solas sin
+ * importar quien escriba. Se agregan una sola vez; las reglas que ya
+ * tenga la hoja se conservan.
+ */
+function asegurarColores_(hoja) {
+  const reglas = hoja.getConditionalFormatRules();
+  const ya = reglas.some(r => {
+    const c = r.getBooleanCondition();
+    return c && c.getCriteriaValues().indexOf(ALERTA_48) >= 0;
+  });
+  if (ya) return;
+  const rango = hoja.getRange(2, COL_OBS_DEV, hoja.getMaxRows() - 1, 1);
+  reglas.push(
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(ALERTA_24)
+      .setBackground(NARANJA).setFontColor('#000000').setBold(true)
+      .setRanges([rango]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(ALERTA_48)
+      .setBackground(ROJO).setFontColor('#ffffff').setBold(true)
+      .setRanges([rango]).build());
+  hoja.setConditionalFormatRules(reglas);
+}
+
 // ------------------------------------------------------------ Reporte
 
 /**
  * El correo de las 10 am: todos los RTS desde DESDE_REPORTE, y las
- * devoluciones de ese periodo que aun no estan en DEVUELTO, con sus
- * alertas de 24 y 48 horas. Lo dispara el activador de
- * instalarCorreoDiario(); tambien se puede ejecutar a mano para probar.
+ * devoluciones de ese periodo con alerta de 24 o 48 horas en la columna
+ * H. Lo dispara el activador de instalarCorreoDiario(); tambien se puede
+ * ejecutar a mano para probar.
  */
 function enviarReporte() {
+  const r = armarReporte_();
+  MailApp.sendEmail({
+    to: DESTINATARIOS,
+    subject: r.asunto,
+    htmlBody: r.html,
+    attachments: r.adjuntos,
+  });
+}
+
+function armarReporte_() {
   const libro = SpreadsheetApp.openById(SHEET_ID);
   const hoy = Utilities.formatDate(new Date(), ZONA, 'dd/MM/yyyy');
 
@@ -210,18 +262,21 @@ function enviarReporte() {
   const rts = filasDesde_(libro.getSheetByName(HOJA))
     .map(f => [f[0], f[2], f[3], f[4], f[7] || 'Sin consultar', f[8]]);
 
-  // DEVOLUCIONES: A fecha, B motivo, C zona, D id, E estatus, F fecha, G obs
-  const orden = {'MAYOR A 48 HRS': 0, 'ALERTA 24 HRS': 1};
+  // DEVOLUCIONES con alerta en H: primero las de 48 horas
+  const orden = {};
+  orden[ALERTA_48] = 0;
+  orden[ALERTA_24] = 1;
   const dev = filasDesde_(libro.getSheetByName(HOJA_DEV))
-    .filter(f => f[3] && !esFinal_(f[4], ['devuelto']))
-    .map(f => [f[0], f[1], f[2], f[3], f[4] || 'Sin consultar', f[5], f[6]])
-    .sort((a, b) => (orden[a[6]] ?? 2) - (orden[b[6]] ?? 2));
+    .filter(f => f[COL_OBS_DEV - 1] === ALERTA_24 || f[COL_OBS_DEV - 1] === ALERTA_48)
+    .map(f => f.slice(0, COL_OBS_DEV))
+    .sort((a, b) => orden[a[7]] - orden[b[7]]);
 
-  const a48 = dev.filter(f => f[6] === 'MAYOR A 48 HRS').length;
-  const a24 = dev.filter(f => f[6] === 'ALERTA 24 HRS').length;
+  const a48 = dev.filter(f => f[7] === ALERTA_48).length;
+  const a24 = dev.length - a48;
 
   const cabRts = ['FECHA', 'ID PQTE', 'USUARIO', 'MOTIVO', 'ESTATUS MELI', 'FECHA ESTATUS'];
-  const cabDev = ['FECHA', 'MOTIVO', 'ZONA', 'ID', 'ESTATUS MELI', 'FECHA ESTATUS', 'OBSERVACIONES'];
+  const cabDev = ['FECHA', 'MOTIVO', 'ZONA', 'ID', 'ESTATUS MELI', 'FECHA ESTATUS',
+                  'FECHA REVISIÓN', 'OBSERVACIONES'];
 
   const html =
     '<div style="font-family:Arial,sans-serif;font-size:13px;color:#222">' +
@@ -229,28 +284,29 @@ function enviarReporte() {
     '<p style="margin:0 0 14px;color:#555">Filas con fecha desde ' +
     Utilities.formatDate(DESDE_REPORTE, ZONA, 'dd/MM/yyyy') + '. ' +
     'Estatus tomado de Mercado Libre por Extractor_RTS.</p>' +
-    '<h3 style="margin:16px 0 4px">Devoluciones sin DEVUELTO: ' + dev.length + '</h3>' +
-    '<p style="margin:0 0 6px"><b style="color:#c62828">Mayor a 48 hrs: ' + a48 +
-    '</b> &nbsp;·&nbsp; <b style="color:#ef6c00">Alerta 24 hrs: ' + a24 + '</b></p>' +
-    tablaHtml_(cabDev, dev, 6) +
-    '<h3 style="margin:22px 0 4px">CONSOLIDADO_RTS: ' + rts.length + '</h3>' +
+    '<h3 style="margin:16px 0 4px">CONSOLIDADO_RTS: ' + rts.length + '</h3>' +
     resumenHtml_(rts, 4) +
     tablaHtml_(cabRts, rts, -1) +
+    '<h3 style="margin:22px 0 4px">DEVOLUCIONES con alerta: ' + dev.length + '</h3>' +
+    '<p style="margin:0 0 6px"><span style="background:' + ROJO +
+    ';color:#fff;padding:1px 6px;font-weight:bold">Mayor a 48 hrs: ' + a48 +
+    '</span> &nbsp; <span style="background:' + NARANJA +
+    ';padding:1px 6px;font-weight:bold">Alerta 24 hrs: ' + a24 + '</span></p>' +
+    tablaHtml_(cabDev, dev, 7) +
     '</div>';
 
   // Los mismos datos en CSV, por si el correo se recorta
   const adjuntos = [
-    Utilities.newBlob(csv_(cabDev, dev), 'text/csv', 'devoluciones_pendientes.csv'),
     Utilities.newBlob(csv_(cabRts, rts), 'text/csv', 'consolidado_rts.csv'),
+    Utilities.newBlob(csv_(cabDev, dev), 'text/csv', 'devoluciones_con_alerta.csv'),
   ];
 
-  MailApp.sendEmail({
-    to: DESTINATARIOS,
-    subject: 'Reporte RTS y devoluciones · ' + hoy +
-             (a48 ? ' · ' + a48 + ' mayores a 48 hrs' : ''),
-    htmlBody: html,
-    attachments: adjuntos,
-  });
+  return {
+    asunto: 'Reporte RTS y devoluciones · ' + hoy +
+            (a48 ? ' · ' + a48 + ' mayores a 48 hrs' : ''),
+    html: html,
+    adjuntos: adjuntos,
+  };
 }
 
 /** Filas con FECHA (columna A) desde DESDE_REPORTE, como se ven. */
@@ -289,10 +345,14 @@ function tablaHtml_(cabecera, filas, colAlerta) {
   let h = '<table style="border-collapse:collapse;font-size:12px">' +
           '<tr>' + cabecera.map(c => '<th ' + th + '>' + c + '</th>').join('') + '</tr>';
   filas.forEach(f => {
-    let fondo = '';
-    if (colAlerta >= 0 && f[colAlerta] === 'MAYOR A 48 HRS') fondo = 'background:#ffebee;';
-    else if (colAlerta >= 0 && f[colAlerta] === 'ALERTA 24 HRS') fondo = 'background:#fff3e0;';
-    h += '<tr>' + f.map(v => '<td style="' + fondo + td + '">' + esc_(v) + '</td>').join('') + '</tr>';
+    // Solo la celda de la alerta se pinta, con los mismos colores que en
+    // la hoja
+    h += '<tr>' + f.map((v, i) => {
+      let fondo = '';
+      if (i === colAlerta && v === ALERTA_48) fondo = 'background:' + ROJO + ';color:#fff;font-weight:bold;';
+      else if (i === colAlerta && v === ALERTA_24) fondo = 'background:' + NARANJA + ';font-weight:bold;';
+      return '<td style="' + fondo + td + '">' + esc_(v) + '</td>';
+    }).join('') + '</tr>';
   });
   return h + '</table>';
 }

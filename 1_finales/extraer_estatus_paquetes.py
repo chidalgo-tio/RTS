@@ -12,10 +12,12 @@ reciente) y su fecha ("21/09/2026 14:20").
 
   CONSOLIDADO_RTS   id en C -> estatus en H, fecha en I
                     No reconsulta Entregado, Dañado ni Devuelto.
-  DEVOLUCIONES      id en D -> estatus en E, fecha en F, alerta en G
-                    Reconsulta todo lo que no este en Devuelto. En G pone
-                    "ALERTA 24 HRS" si desde la FECHA (A) pasaron 24 horas,
-                    o "MAYOR A 48 HRS" si pasaron 48.
+  DEVOLUCIONES      id en D -> estatus en E, fecha en F, fecha de esta
+                    revision en G, alerta en H.
+                    Reconsulta todo lo que no este en Devuelto. En H pone
+                    "ALERTA 24 HRS" si entre la FECHA (A) y la revision
+                    pasaron 24 horas, o "MAYOR A 48 HRS" si pasaron 48;
+                    salvo que este Devuelto, Entregado o en Destruccion.
 
 En las dos, solo filas con FECHA (columna A) desde FECHA_INICIAL (01-10-26).
 
@@ -72,17 +74,22 @@ ALERTA_48 = "MAYOR A 48 HRS"
 ALERTAS = (ALERTA_24, ALERTA_48)
 
 # Que hoja revisar y donde. Columnas contadas desde 0 (A = 0).
-#   estatus: la del estatus; la fecha va en la siguiente y, si hay
-#            alertas, la alerta en la que sigue a esa.
-#   finales: estatus que ya no cambian. Esas filas no se reconsultan. Se
-#            compara el inicio del texto sin acentos: "Entregado - Place"
-#            tambien cuenta. La Web App lo vuelve a revisar antes de
-#            escribir.
+#   estatus:    la del estatus. Le siguen, en este orden: la fecha del
+#               estatus; si revision, la fecha de esta revision; si hay
+#               alertas, la alerta.
+#   finales:    estatus que ya no cambian. Esas filas no se reconsultan.
+#               La Web App lo vuelve a revisar antes de escribir.
+#   sin_alerta: estatus que no llevan alerta aunque pase el tiempo.
+# Se compara el inicio del texto sin acentos: "Entregado - Place" y
+# "Entregado-Place" cuentan como "entregado".
 HOJAS = (
-    {"nombre": "CONSOLIDADO_RTS", "id": 2, "estatus": 7,           # C, H, I
-     "finales": ("entregado", "danado", "devuelto"), "alertas": False},
-    {"nombre": "DEVOLUCIONES", "id": 3, "estatus": 4,              # D, E, F, G
-     "finales": ("devuelto",), "alertas": True},
+    {"nombre": "CONSOLIDADO_RTS", "id": 2, "estatus": 7,           # C -> H, I
+     "finales": ("entregado", "danado", "devuelto"),
+     "revision": False, "alertas": False, "sin_alerta": ()},
+    {"nombre": "DEVOLUCIONES", "id": 3, "estatus": 4,              # D -> E, F, G, H
+     "finales": ("devuelto",),
+     "revision": True, "alertas": True,
+     "sin_alerta": ("devuelto", "entregado", "destruccion")},
 )
 
 URL_PAQUETE = "https://envios.adminml.com/logistics/package-management/package/"
@@ -176,8 +183,8 @@ def fecha_de(texto):
 
 
 def alerta_para(fecha_fila, ahora=None):
-    """Horas desde la FECHA de la fila. La columna A no trae hora: se
-    cuenta desde las 00:00 de ese dia."""
+    """Horas entre la FECHA de la fila y la revision. La columna A no trae
+    hora: se cuenta desde las 00:00 de ese dia."""
     ahora = ahora or datetime.now()
     horas = (ahora - datetime(fecha_fila.year, fecha_fila.month,
                               fecha_fila.day)).total_seconds() / 3600
@@ -308,6 +315,7 @@ def leer_pendientes(web, conf, desde=FECHA_INICIAL):
     """
     tabla = web.leer_tabla(conf["nombre"])
     c_est = conf["estatus"]
+    c_obs = col_alerta(conf)
 
     pendientes, limpiezas = {}, []
     cuentas = {"en_rango": 0, "finales": 0, "fuera": 0}
@@ -324,11 +332,12 @@ def leer_pendientes(web, conf, desde=FECHA_INICIAL):
         actual = {"fila": n, "fecha_fila": f,
                   "estatus": limpiar(fila[c_est]),
                   "fecha": limpiar(fila[c_est + 1]),
-                  "obs": limpiar(fila[c_est + 2]) if conf["alertas"] else ""}
+                  "obs": limpiar(fila[c_obs]) if conf["alertas"] else ""}
         if es_final(actual["estatus"], conf["finales"]):
             cuentas["finales"] += 1
             if conf["alertas"] and actual["obs"] in ALERTAS:
-                limpiezas.append({"fila": n, "valores": [None, None, ""]})
+                valores = [None] * (c_obs - c_est) + [""]
+                limpiezas.append({"fila": n, "valores": valores})
             continue
         pendientes.setdefault(pid, []).append(actual)
 
@@ -342,12 +351,19 @@ def leer_pendientes(web, conf, desde=FECHA_INICIAL):
     return pendientes, limpiezas, cuentas
 
 
-def cambio_de_fila(conf, actual, nuevo):
+def col_alerta(conf):
+    """Columna (desde 0) de la alerta: tras estatus, fecha y revision."""
+    return conf["estatus"] + 2 + (1 if conf["revision"] else 0)
+
+
+def cambio_de_fila(conf, actual, nuevo, ahora=None):
     """Lo que hay que escribir en una fila, o None si nada cambia.
 
     nuevo: (estatus, fecha) leidos del panel, o None si no se pudo ver el
     paquete; en ese caso solo puede cambiar la alerta.
+    ahora: momento de la revision (el mismo para toda la corrida).
     """
+    ahora = ahora or datetime.now()
     valores = [None, None]
     estatus = actual["estatus"]
     if nuevo:
@@ -355,13 +371,17 @@ def cambio_de_fila(conf, actual, nuevo):
         if (estatus, fecha) != (actual["estatus"], actual["fecha"]):
             valores = [estatus, fecha]
 
+    if conf["revision"]:
+        # Solo si el panel mostro el paquete: es cuando de verdad se reviso
+        valores.append(f"{ahora:%d/%m/%Y %H:%M}" if nuevo else None)
+
     if conf["alertas"]:
         obs = None
-        # Nunca se pisa una nota escrita a mano: solo se escribe en G si
-        # esta vacia o si tiene una alerta de este programa
+        # Nunca se pisa una nota escrita a mano: solo se escribe la alerta
+        # si la celda esta vacia o ya tiene una alerta de este programa
         if actual["obs"] in ("",) + ALERTAS and actual["fecha_fila"]:
-            alerta = ("" if es_final(estatus, conf["finales"])
-                      else alerta_para(actual["fecha_fila"]))
+            alerta = ("" if es_final(estatus, conf["sin_alerta"])
+                      else alerta_para(actual["fecha_fila"], ahora))
             if alerta != actual["obs"]:
                 obs = alerta
         valores.append(obs)
@@ -764,6 +784,8 @@ def ejecutar(desde=FECHA_INICIAL, pestanas=PESTANAS, limite=0, ids=None,
 
     respaldo = []
     conteo = resumen["conteo"]
+    # Una sola hora de revision para toda la corrida
+    ahora = datetime.now()
 
     def al_terminar(pid, estado, dato):
         filas = pendientes[pid]
@@ -782,9 +804,9 @@ def ejecutar(desde=FECHA_INICIAL, pestanas=PESTANAS, limite=0, ids=None,
             respaldo.append([pid, donde, "", "", dato or estado])
 
         for conf, actual in filas:
-            cambio = cambio_de_fila(conf, actual, nuevo)
+            cambio = cambio_de_fila(conf, actual, nuevo, ahora)
             if conf["alertas"]:
-                g = cambio["valores"][2] if cambio else None
+                g = cambio["valores"][-1] if cambio else None
                 alerta = actual["obs"] if g is None else g
                 if alerta == ALERTA_24:
                     resumen["alerta_24"] += 1
