@@ -1,6 +1,6 @@
 # Los programas que se usan
 
-Estos siete son los definitivos. Todo lo demás en el repo es el camino que
+Estos ocho son los definitivos. Todo lo demás en el repo es el camino que
 llevó hasta ellos.
 
 | Programa | Qué hace | Tiempo |
@@ -12,6 +12,7 @@ llevó hasta ellos.
 | **`CapacidadMeli.exe`** | Pedidos de vehículos por estación y tipo | ~1 s/día |
 | **`MapasMeli.exe`** | Paradas de cada ruta con sus coordenadas | ~1 min/día |
 | **`Extractor_RTS.exe`** | Estatus de RTS y devoluciones en la hoja, con alertas y correo diario | ~2 s/paquete |
+| **`Extractor_Direcciones.exe`** | Comprador, dirección y coordenadas de cada paquete; polígonos de entrega en mapa | ~2 s/paquete |
 
 ## `DriversMeli.exe` — el padrón
 
@@ -403,6 +404,49 @@ La Web App y el correo están en `apps_script/estatus_paquetes.gs`, con la
 instalación explicada arriba del archivo. El archivo se elige en
 `SHEET_ID` y las pestañas en `HOJAS`, al inicio de
 `extraer_estatus_paquetes.py`.
+
+## `Extractor_Direcciones.exe` — direcciones y polígonos
+
+```
+[ pega los IDs, uno por renglón ]
+[ 1 · EXTRAER DIRECCIONES ]  [ DETENER ]
+(•) Por cantidad   ( ) Por código postal    Máximo por polígono [25]
+Solo estos CP: [            ]
+[ 2 · ARMAR POLÍGONOS Y ABRIR MAPA ]  [ Cargar reporte anterior ]
+```
+
+**Paso 1** abre la ficha de cada paquete y lee "Datos del comprador" y
+"Dirección de entrega": nombre, teléfono, calle, número, CP, barrio,
+ciudad, provincia, más datos, referencias, tipo de domicilio y zona
+correspondiente. Las coordenadas salen del enlace *Ver en Google Maps*.
+Desde octubre de 2026 la ficha ya no trae estos datos en
+`__PRELOADED_STATE__` (de ahí los sacaba Fecha Promesa): se leen de los
+campos ya dibujados.
+
+**Paso 2** agrupa los paquetes con ubicación:
+
+| Opción | Resultado |
+|---|---|
+| Por cantidad | polígonos `P01`, `P02`… de hasta N paquetes, juntando los cercanos |
+| Por código postal | un polígono por CP (`CP 35118`); si pasa de N, se parte (`CP 35118-2`) |
+| Solo estos CP | los demás quedan `FUERA (CP)` |
+
+El reporte (`direcciones\direcciones_<fecha>.csv`) trae la columna
+**POLIGONO** en cada ID, y el mapa (`direcciones\mapa_<fecha>.html`, se
+abre solo) muestra cada zona en un color, con buscador de ID y el detalle
+de cada paquete al tocarlo. Se puede volver a armar con otras opciones, o
+cargar un reporte de otro día, sin extraer de nuevo.
+
+**El SC importa**: los IDs de otra estación salen como *De otro SC (no
+autorizado)*. Usa su propio perfil de Chrome (`chrome_direcciones`), así
+que puede estar abierto junto con Extractor_RTS; la primera vez pide
+iniciar sesión y elegir la estación.
+
+**Pendiente para la siguiente versión**: km por ruta desde el CEDIS de
+salida (habrá varios CEDIS).
+
+Los reportes y el mapa traen nombres, teléfonos y direcciones: la carpeta
+`direcciones\` no se sube al repo.
 
 ## Requisitos
 
