@@ -118,8 +118,31 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # El mismo perfil que los demas programas: si ya iniciaste sesion con
-# ellos, aqui no hace falta volver a hacerlo
+# ellos, aqui no hace falta volver a hacerlo. Vive junto al programa, que
+# debe estar en una carpeta que NO sincronice ninguna nube (C:\Extractores):
+# Chrome cambia esos archivos todo el tiempo y OneDrive o Google Drive se
+# traban intentando subirlos
 PROFILE_DIR = os.path.join(BASE_DIR, "chrome_profile")
+
+
+def carpeta_reportes(nombre):
+    """Donde se guardan los reportes: en Google Drive (Mi unidad > Reportes
+    extractores > <nombre>) si esta instalado, que es la nube de la empresa;
+    si no, junto al programa. Los reportes traen datos de clientes y
+    conductores: mejor en la nube de la empresa que en una personal."""
+    for letra in "GHIJKLMNOPQRSTUVWXYZDEF":
+        for mi_unidad in ("Mi unidad", "My Drive"):
+            raiz = f"{letra}:\\{mi_unidad}"
+            if os.path.isdir(raiz):
+                ruta = os.path.join(raiz, "Reportes extractores", nombre)
+                try:
+                    os.makedirs(ruta, exist_ok=True)
+                    return ruta
+                except OSError:
+                    pass
+    ruta = os.path.join(BASE_DIR, nombre)
+    os.makedirs(ruta, exist_ok=True)
+    return ruta
 NOMBRE_CONFIG = "webapp_sheets.json"
 
 MESES = {
@@ -720,7 +743,7 @@ def consultar(driver, ids, al_terminar, pestanas=PESTANAS, detener=None):
 def guardar_respaldo(filas):
     """Copia local de lo consultado, incluidos los que fallaron."""
     sello = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ruta = os.path.join(BASE_DIR, f"estatus_paquetes_{sello}.csv")
+    ruta = os.path.join(carpeta_reportes("estatus"), f"estatus_paquetes_{sello}.csv")
     with open(ruta, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(["ID PAQUETE", "HOJA:FILAS", "ESTATUS", "FECHA", "RESULTADO"])

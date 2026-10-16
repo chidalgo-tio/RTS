@@ -54,7 +54,8 @@ import extraer_estatus_paquetes as base
 # "chrome_profile", asi que el cierre de Chrome huerfanos de uno no toca
 # el Chrome del otro
 base.PROFILE_DIR = os.path.join(base.BASE_DIR, "chrome_direcciones")
-CARPETA = os.path.join(base.BASE_DIR, "direcciones")
+# Reportes y mapas: en Google Drive si esta instalado (ver carpeta_reportes)
+CARPETA = base.carpeta_reportes("direcciones")
 
 log = base.log
 URL_PAQUETE = base.URL_PAQUETE

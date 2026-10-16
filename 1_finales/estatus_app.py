@@ -229,7 +229,7 @@ class Ventana(QMainWindow):
         self.trabajador.detener.set()
 
     def al_carpeta(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(_carpeta_base()))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(nucleo.carpeta_reportes("estatus")))
 
     def al_terminar(self, r):
         self._ocupado(False)
