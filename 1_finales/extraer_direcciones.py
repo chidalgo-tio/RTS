@@ -504,8 +504,16 @@ PLANTILLA_MAPA = r"""<!DOCTYPE html>
 const DATOS = __DATOS__;
 const FUERA = __FUERA__;
 const mapa = L.map('mapa');
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(mapa);
+// Fondos que sirven desde un archivo local. Los de openstreetmap.org NO:
+// su politica exige saber desde que sitio se piden, un archivo abierto en
+// el navegador no lo dice, y cada cuadro sale "Access blocked"
+const calles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  maxZoom: 20, subdomains: 'abcd',
+  attribution: '&copy; OpenStreetMap &copy; CARTO'});
+const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, attribution: 'Imágenes &copy; Esri'});
+calles.addTo(mapa);
+L.control.layers({'Calles': calles, 'Satélite': satelite}, null, {position: 'topright'}).addTo(mapa);
 
 const esc = s => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const todos = [], porId = {};
