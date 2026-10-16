@@ -504,14 +504,21 @@ PLANTILLA_MAPA = r"""<!DOCTYPE html>
 const DATOS = __DATOS__;
 const FUERA = __FUERA__;
 const mapa = L.map('mapa');
-// Fondos que sirven desde un archivo local. Los de openstreetmap.org NO:
-// su politica exige saber desde que sitio se piden, un archivo abierto en
-// el navegador no lo dice, y cada cuadro sale "Access blocked"
-const calles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-  maxZoom: 20, subdomains: 'abcd',
-  attribution: '&copy; OpenStreetMap &copy; CARTO'});
-const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  maxZoom: 19, attribution: 'Imágenes &copy; Esri'});
+// Fondos que sirven desde un archivo local. openstreetmap.org y CARTO NO:
+// piden saber desde que sitio se consultan (o una clave), un archivo
+// abierto en el navegador no lo dice, y cada cuadro sale "Access
+// blocked" o "API KEY REQUIRED". Esri si responde (revisado viendo los
+// cuadros, no solo el codigo 200: el aviso tambien es una imagen valida)
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const calles = L.tileLayer(ESRI + 'World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, attribution: 'Mapa &copy; Esri'});
+const satelite = L.layerGroup([
+  L.tileLayer(ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19,
+    attribution: 'Imágenes &copy; Esri'}),
+  // Nombres de calles y colonias encima de la foto
+  L.tileLayer(ESRI + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19}),
+  L.tileLayer(ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19}),
+]);
 calles.addTo(mapa);
 L.control.layers({'Calles': calles, 'Satélite': satelite}, null, {position: 'topright'}).addTo(mapa);
 
