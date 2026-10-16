@@ -255,7 +255,7 @@ class Ventana(QMainWindow):
         self._ocupado(False)
         self._contar()
         ruta = nucleo.guardar_csv(filas)
-        self.escribir(f"Reporte guardado: {os.path.basename(ruta)}")
+        self.escribir(f"Reporte guardado: {os.path.basename(ruta)[:-4]} (.xlsx para Excel y .csv)")
         self.paso.setText("Paso 2 · Elige cómo agrupar y presiona ARMAR POLÍGONOS.")
         sin = sum(1 for x in filas if not x.get("RESULTADO", "").startswith("ok"))
         if sin:
@@ -302,7 +302,7 @@ class Ventana(QMainWindow):
         self.escribir(f"Polígonos ({desc}): {len(zonas)}")
         for k in sorted(resumen):
             self.escribir(f"   {k:<16} {resumen[k]}")
-        self.escribir(f"Reporte: {os.path.basename(csv_ruta)} · Mapa: {os.path.basename(mapa)}")
+        self.escribir(f"Reporte: {os.path.basename(csv_ruta)[:-4]} (.xlsx y .csv) · Mapa: {os.path.basename(mapa)}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(mapa))
         self.paso.setText(f"Listo · {len(zonas)} polígonos. Puedes armarlos otra vez "
                           "con otras opciones.")

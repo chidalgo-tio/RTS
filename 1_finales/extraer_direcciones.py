@@ -413,6 +413,56 @@ def guardar_csv(filas, ruta=None):
         w.writeheader()
         for fila in filas:
             w.writerow({c: fila.get(c, "") for c in COLUMNAS})
+    try:
+        guardar_xlsx(filas, ruta)
+    except Exception as e:
+        log(f"No se pudo crear el Excel ({e}); queda el CSV.")
+    return ruta
+
+
+def guardar_xlsx(filas, ruta_csv):
+    """El mismo reporte en Excel, junto al CSV.
+
+    El CSV no dice en que codificacion viene: segun como se abra, Excel lo
+    lee mal y "Gómez" sale "GÃ³mez", o junta todo en una columna por el
+    punto y coma. El .xlsx guarda el texto sin ambiguedad y cada dato en
+    su columna. El CSV se queda para "Cargar reporte anterior".
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    ruta = os.path.splitext(ruta_csv)[0] + ".xlsx"
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = "Direcciones"
+    hoja.append(COLUMNAS)
+    for celda in hoja[1]:
+        celda.font = Font(bold=True, color="FFFFFF")
+        celda.fill = PatternFill("solid", fgColor="1E2128")
+    for fila in filas:
+        valores = []
+        for c in COLUMNAS:
+            v = fila.get(c, "")
+            # Coordenadas como numero (sirven para filtrar u ordenar); lo
+            # demas como texto, asi el telefono y el CP no pierden ceros
+            if c in ("LATITUD", "LONGITUD") and v:
+                try:
+                    v = float(v)
+                except ValueError:
+                    pass
+            valores.append(v)
+        hoja.append(valores)
+    texto = [i + 1 for i, c in enumerate(COLUMNAS) if c not in ("LATITUD", "LONGITUD")]
+    for col in texto:
+        for celda in hoja.iter_rows(min_row=2, min_col=col, max_col=col):
+            celda[0].number_format = "@"
+    for i, c in enumerate(COLUMNAS, start=1):
+        largo = max([len(str(f.get(c, ""))) for f in filas] + [len(c)])
+        hoja.column_dimensions[get_column_letter(i)].width = min(max(10, largo + 2), 60)
+    hoja.freeze_panes = "C2"
+    hoja.auto_filter.ref = hoja.dimensions
+    libro.save(ruta)
     return ruta
 
 
