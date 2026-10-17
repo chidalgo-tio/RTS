@@ -500,6 +500,9 @@ def crear_driver():
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--lang=es-MX")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+    # Que Chrome siga abierto cuando el programa se desconecta al terminar:
+    # el usuario lo cierra a mano (ver soltar_driver)
+    opts.add_experimental_option("detach", True)
     # Navegar sin esperar la carga: el programa vigila la pestaña por su
     # cuenta y asi un panel lento no deja colgado a Selenium
     opts.page_load_strategy = "none"
@@ -543,6 +546,30 @@ def cerrar_driver(driver):
 def _quit_silencioso(driver):
     try:
         driver.quit()
+    except Exception:
+        pass
+
+
+def soltar_driver(driver):
+    """Desconecta el programa de Chrome sin cerrarlo: solo se apaga el
+    chromedriver y la ventana queda abierta (gracias a "detach") para que
+    el usuario la revise y la cierre el. Si sigue abierta en la siguiente
+    corrida, limpiar_lock la cierra antes de volver a usar el perfil."""
+    if not driver:
+        return
+    hilo = threading.Thread(target=lambda: _stop_silencioso(driver), daemon=True)
+    hilo.start()
+    hilo.join(ESPERA_CIERRE)
+    if hilo.is_alive():
+        try:
+            driver.service.process.kill()
+        except Exception:
+            pass
+
+
+def _stop_silencioso(driver):
+    try:
+        driver.service.stop()
     except Exception:
         pass
 
@@ -861,8 +888,8 @@ def ejecutar(desde=FECHA_INICIAL, pestanas=PESTANAS, limite=0, ids=None,
         except Exception as e:
             resumen["error"] = resumen["error"] or str(e)
             log(f"ERROR al escribir los ultimos cambios: {e}")
-        log("Cerrando Chrome...")
-        cerrar_driver(driver)
+        soltar_driver(driver)
+        log("Chrome queda abierto: cierralo tu cuando termines.")
 
     resumen["respaldo"] = guardar_respaldo(respaldo)
     resumen["minutos"] = (time.time() - inicio) / 60
