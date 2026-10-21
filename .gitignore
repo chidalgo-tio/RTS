@@ -100,3 +100,8 @@ chrome_direcciones/
 webapp_reportes.json
 chrome_reportes/
 1_finales/Reporte_Operacion.exe
+
+# Casos PNR: desde que carga el Sheets de PNR lleva dentro la URL y la
+# clave de su Web App, asi que el .exe ya no se sube
+webapp_pnr.json
+1_finales/CasosPNR.exe

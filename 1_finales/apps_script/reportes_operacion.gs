@@ -58,6 +58,66 @@ function instalar() {
 }
 
 
+// ------------------------------------------------------ menu del Sheets
+//
+// "Extractor ML > Extraer reporte de operacion" abre una ventanita con las
+// fechas. Su boton es un enlace reporteml://extraer?desde=&hasta=, que
+// Windows abre con Reporte_Operacion.exe (el programa registra ese enlace
+// cada vez que arranca). Solo funciona en computadoras con el programa.
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Extractor ML')
+    .addItem('Extraer reporte de operación…', 'mostrarExtractor')
+    .addToUi();
+}
+
+
+function mostrarExtractor() {
+  const ayer = new Date(Date.now() - 24 * 3600 * 1000);
+  const html = HtmlService.createHtmlOutput(PLANTILLA_DIALOGO.replace(
+      /__AYER__/g, Utilities.formatDate(ayer, ZONA, 'yyyy-MM-dd')))
+    .setWidth(380).setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Reporte de operación · Last Mile');
+}
+
+
+const PLANTILLA_DIALOGO = `
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #333; margin: 4px; }
+  label { display: inline-block; width: 52px; }
+  input[type=date] { padding: 5px; font-size: 13px; margin: 4px 0; }
+  a.boton { display: block; margin: 14px 0 10px; padding: 11px; text-align: center;
+            background: #ffe600; color: #333; font-weight: bold; border-radius: 6px;
+            text-decoration: none; }
+  .nota { color: #777; font-size: 11px; line-height: 1.4; }
+</style>
+<div><label>Desde</label><input type="date" id="desde" value="__AYER__"></div>
+<div><label>Hasta</label><input type="date" id="hasta" value="__AYER__"></div>
+<a class="boton" id="abrir" href="#" target="_blank">Abrir extractor</a>
+<div class="nota">
+  Se abre una pestaña nueva y el navegador pregunta si quieres abrir
+  <b>Reporte_Operacion</b>: acepta y cierra esa pestaña. El programa abre Chrome
+  con Mercado Libre; si pide iniciar sesión, hazlo ahí. Al terminar,
+  recarga esta hoja para ver los datos.<br><br>
+  Solo funciona en computadoras que tengan Reporte_Operacion.exe y lo hayan
+  abierto al menos una vez.
+</div>
+<script>
+  const a = document.getElementById('abrir');
+  function armar() {
+    let d = document.getElementById('desde').value;
+    let h = document.getElementById('hasta').value || d;
+    if (h < d) { const t = d; d = h; h = t; }
+    a.href = 'reporteml://extraer?desde=' + d + '&hasta=' + h;
+  }
+  document.getElementById('desde').onchange = armar;
+  document.getElementById('hasta').onchange = armar;
+  armar();
+</script>
+`;
+
+
 function doGet(e) {
   if ((e.parameter || {}).token !== TOKEN) return json_({ok: false, error: 'token'});
   return json_({ok: true});

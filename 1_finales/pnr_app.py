@@ -8,7 +8,9 @@ puesto el periodo en curso, que es el caso normal.
 
 import os
 import sys
+import time
 import traceback
+import urllib.parse
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QUrl
@@ -26,6 +28,44 @@ from estilo_ventana import (
 )
 
 
+# El menu ACTUALIZAR > Extraer PNRs del Google Sheets abre
+# casospnr://extraer?periodo=202610Q2 y Windows lanza este programa con
+# ese enlace como argumento
+PROTOCOLO = "casospnr"
+
+# Minutos esperando a que la persona inicie sesion (modo automatico)
+ESPERA_LOGIN = 10
+
+
+def registrar_protocolo():
+    """Le dice a Windows que los enlaces casospnr:// abren este .exe. Va en
+    HKEY_CURRENT_USER (sin permisos de administrador) y se repite en cada
+    arranque, asi sigue sirviendo si el .exe cambia de carpeta."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    try:
+        import winreg
+        base = rf"Software\Classes\{PROTOCOLO}"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base) as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "URL:Casos PNR")
+            winreg.SetValueEx(k, "URL Protocol", 0, winreg.REG_SZ, "")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base + r"\shell\open\command") as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f'"{sys.executable}" "%1"')
+    except OSError:
+        pass
+
+
+def periodo_del_enlace(argumentos):
+    """casospnr://extraer?periodo=202610Q2 -> '202610Q2', o None."""
+    for a in argumentos:
+        if a.lower().startswith(PROTOCOLO + ":"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(a).query)
+            p = (q.get("periodo") or [""])[0].upper()
+            if len(p) == 8 and p[:6].isdigit() and p[6:] in ("Q1", "Q2"):
+                return p
+    return None
+
+
 class Puente(QObject):
     mensaje = Signal(str)
     terminado = Signal(str, object)
@@ -37,6 +77,7 @@ class Ordenes(QObject):
     correria en el hilo de la ventana y la congelaria."""
     abrir = Signal()
     extraer = Signal(str)
+    automatico = Signal(str)
     cerrar = Signal()
 
 
@@ -87,12 +128,57 @@ class Trabajador(QObject):
             self.log(f"Detalles completos: {n}/{len(self.registros)}")
 
             csvf = nucleo.guardar_control(self.registros, periodo)
-            self.log(f"Listo: {os.path.basename(csvf)}")
-            self.p.terminado.emit("extraido", (self.registros, csvf))
+            self.log(f"Listo: {os.path.basename(csvf)} (y .xlsx)")
+
+            sheets = None
+            if nucleo.hay_sheets():
+                self.log("Cargando REPORTE_TEMP en el Google Sheets y "
+                         "actualizando el CONSOLIDADO...")
+                try:
+                    sheets = nucleo.enviar_a_sheets(
+                        nucleo.filas_control(self.registros, periodo))
+                    self.log(f"Sheets: {sheets.get('nuevos', 0)} nuevos, "
+                             f"{sheets.get('actualizados', 0)} actualizados, "
+                             f"{sheets.get('sinCambios', 0)} sin cambios.")
+                except Exception as e:
+                    sheets = {"error": str(e)}
+                    self.log(f"ERROR al cargar el Google Sheets: {e}")
+            self.p.terminado.emit("extraido", (self.registros, csvf, sheets))
 
         except Exception as e:
             traceback.print_exc()
             self.p.fallo.emit(self._explicar(e))
+
+    @Slot(str)
+    def automatico(self, periodo):
+        """Lo pidio el Google Sheets: abrir Chrome, esperar la sesion y
+        extraer, sin que nadie pulse nada."""
+        try:
+            if not self.driver:
+                self.log("Abriendo Chrome...")
+                self.driver = nucleo.crear_driver()
+                self.driver.get(nucleo.URL)
+            self.log("Si Chrome pide iniciar sesion en Mercado Libre, hazlo "
+                     "ahi; el programa sigue solo.")
+            limite = time.time() + ESPERA_LOGIN * 60
+            while time.time() < limite:
+                time.sleep(2)
+                try:
+                    url = self.driver.current_url or ""
+                except Exception:
+                    continue
+                if "/logistics/case-center" in url:
+                    break
+            else:
+                self.p.fallo.emit(f"En {ESPERA_LOGIN} minutos no se vio la "
+                                  "bandeja de casos con la sesion iniciada.")
+                return
+            self.log("Sesion lista.")
+            time.sleep(3)
+        except Exception as e:
+            self.p.fallo.emit(self._explicar(e))
+            return
+        self.extraer(periodo)
 
     @Slot()
     def cerrar(self):
@@ -269,6 +355,7 @@ class Ventana(QMainWindow):
 
         self.ordenes.abrir.connect(self.trabajador.abrir_navegador)
         self.ordenes.extraer.connect(self.trabajador.extraer)
+        self.ordenes.automatico.connect(self.trabajador.automatico)
         self.ordenes.cerrar.connect(self.trabajador.cerrar)
 
         self.puente.mensaje.connect(self.escribir)
@@ -292,6 +379,20 @@ class Ventana(QMainWindow):
         self.paso.setText(f"Extrayendo los casos de {periodo}...")
         self.ordenes.extraer.emit(periodo)
 
+    def desde_el_sheets(self, periodo):
+        """Lo pidio el menu del Google Sheets: elige el periodo y arranca."""
+        i = self.combo.findData(periodo)
+        if i < 0:
+            self.combo.addItem(nombre_periodo(periodo), periodo)
+            i = self.combo.count() - 1
+        self.combo.setCurrentIndex(i)
+        self.escribir(f"Pedido desde el Google Sheets: periodo {periodo}.")
+        self.b_abrir.setEnabled(False)
+        self.b_extraer.setEnabled(False)
+        self.paso.setText(f"Extrayendo {periodo}. Si Chrome pide iniciar "
+                          "sesion, hazlo ahi; el programa sigue solo.")
+        self.ordenes.automatico.emit(periodo)
+
     def al_carpeta(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(_carpeta_base()))
 
@@ -302,7 +403,7 @@ class Ventana(QMainWindow):
                 "Paso 2 de 2  ·  Inicia sesion y presiona EXTRAER CASOS")
             return
 
-        registros, csvf = datos
+        registros, csvf, sheets = datos
         self.archivo = csvf
         por_estado, suma, sin_monto = nucleo.resumen(registros)
 
@@ -323,11 +424,19 @@ class Ventana(QMainWindow):
         if sin_driver:
             aviso = (f"\n\n{sin_driver} casos vienen sin conductor asignado "
                      "en el panel de Mercado Libre.")
+        if sheets and sheets.get("error"):
+            aviso += ("\n\nNO se cargo el Google Sheets:\n" + sheets["error"])
+        elif sheets:
+            aviso += (f"\n\nGoogle Sheets (CONSOLIDADO):\n"
+                      f"   {sheets.get('nuevos', 0)} nuevos\n"
+                      f"   {sheets.get('actualizados', 0)} actualizados\n"
+                      f"   {sheets.get('sinCambios', 0)} sin cambios")
+        self.b_abrir.setEnabled(self.trabajador.driver is None)
         QMessageBox.information(
             self, "Listo",
             f"{len(registros)} casos PNR\n\n{detalle}\n\n"
             f"Monto total: ${suma:,.2f}{aviso}\n\n"
-            f"{os.path.basename(csvf)}")
+            f"{os.path.basename(csvf)} (y .xlsx)")
 
     def al_fallar(self, mensaje):
         self.b_abrir.setEnabled(True)
@@ -344,10 +453,15 @@ class Ventana(QMainWindow):
 
 
 def main():
+    registrar_protocolo()
     app = QApplication(sys.argv)
     ventana = Ventana()
     ventana.show()
     barra_titulo_oscura(ventana)
+    pedido = periodo_del_enlace(sys.argv[1:])
+    if pedido:
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(300, lambda: ventana.desde_el_sheets(pedido))
     sys.exit(app.exec())
 
 

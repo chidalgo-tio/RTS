@@ -14,9 +14,11 @@ Compilar (ver LEEME.md):
 El .exe lleva dentro la URL y la clave de la Web App: no va al repo.
 """
 
+import os
 import sys
 import threading
 import traceback
+import urllib.parse
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot, QUrl, QDate
@@ -34,6 +36,44 @@ from estilo_ventana import (
 
 URL_SHEETS = ("https://docs.google.com/spreadsheets/d/"
               "1lyoWfp8dLrte7Q6qZnyqpnjGMbI5ZFP0awJ1RRyF7Tg/edit")
+
+# El menu "Extractor ML" del Sheets abre reporteml://extraer?desde=&hasta=
+# y Windows lanza este programa con ese enlace como argumento
+PROTOCOLO = "reporteml"
+
+
+def registrar_protocolo():
+    """Le dice a Windows que los enlaces reporteml:// abren este .exe.
+    Va en HKEY_CURRENT_USER: no pide permisos de administrador. Se hace
+    en cada arranque, asi sigue sirviendo si el .exe cambia de carpeta."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    try:
+        import winreg
+        base = rf"Software\Classes\{PROTOCOLO}"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base) as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "URL:Reporte de operacion ML")
+            winreg.SetValueEx(k, "URL Protocol", 0, winreg.REG_SZ, "")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base + r"\shell\open\command") as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f'"{sys.executable}" "%1"')
+    except OSError:
+        pass
+
+
+def fechas_del_enlace(argumentos):
+    """reporteml://extraer?desde=2026-10-19&hasta=2026-10-19 -> (desde, hasta),
+    o None si no vino un enlace valido."""
+    for a in argumentos:
+        if not a.lower().startswith(PROTOCOLO + ":"):
+            continue
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(a).query)
+        try:
+            desde = date.fromisoformat(q["desde"][0])
+            hasta = date.fromisoformat(q.get("hasta", q["desde"])[0])
+        except (KeyError, ValueError):
+            return None
+        return (desde, hasta) if desde <= hasta else (hasta, desde)
+    return None
 
 
 class Puente(QObject):
@@ -221,13 +261,21 @@ class Ventana(QMainWindow):
         self.hasta.setEnabled(not si)
         self.b_detener.setEnabled(si)
 
-    def al_extraer(self):
+    def desde_el_sheets(self, desde, hasta):
+        """Lo pidio el menu del Google Sheets: pone las fechas y arranca."""
+        self.desde.setDate(QDate(desde.year, desde.month, desde.day))
+        self.hasta.setDate(QDate(hasta.year, hasta.month, hasta.day))
+        self.escribir(f"Pedido desde el Google Sheets: del {desde:%d/%m/%Y} "
+                      f"al {hasta:%d/%m/%Y}.")
+        self.al_extraer(preguntar=False)
+
+    def al_extraer(self, _=None, preguntar=True):
         desde = self.desde.date().toPython()
         hasta = self.hasta.date().toPython()
         if hasta < desde:
             QMessageBox.warning(self, "Fechas", "La fecha Hasta es anterior a Desde.")
             return
-        if hasta >= date.today():
+        if preguntar and hasta >= date.today():
             r = QMessageBox.question(
                 self, "Incluye hoy",
                 "El rango incluye hoy: las rutas del día todavía están en curso "
@@ -290,10 +338,15 @@ class Ventana(QMainWindow):
 
 
 def main():
+    registrar_protocolo()
     app = QApplication(sys.argv)
     ventana = Ventana()
     ventana.show()
     barra_titulo_oscura(ventana)
+    pedido = fechas_del_enlace(sys.argv[1:])
+    if pedido:
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(300, lambda: ventana.desde_el_sheets(*pedido))
     sys.exit(app.exec())
 
 

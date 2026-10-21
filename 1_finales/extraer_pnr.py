@@ -561,13 +561,153 @@ def guardar_control(registros, periodo, sello=None):
     # El nombre tambien como lo daba la plataforma: LOGISTICS_PNR - 202608Q2
     csvf = os.path.join(BASE_DIR, f"LOGISTICS_PNR - {periodo}_{sello}.csv")
     # Separador coma y sin BOM, igual que el original
+    filas = filas_control(registros, periodo)
     with open(csvf, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow([t for _, t in COLUMNAS_CONTROL])
-        for r in registros:
-            fila = _fila_control(r, periodo)
-            w.writerow([fila.get(k, "") for k, _ in COLUMNAS_CONTROL])
+        w.writerows(filas)
+    try:
+        guardar_xlsx_control(csvf, filas)
+    except Exception as e:
+        log(f"No se pudo crear el Excel ({e}); queda el CSV.")
     return csvf
+
+
+def filas_control(registros, periodo):
+    """Las 23 columnas del control, sin encabezado, como listas."""
+    filas = []
+    for r in registros:
+        fila = _fila_control(r, periodo)
+        filas.append([fila.get(k, "") for k, _ in COLUMNAS_CONTROL])
+    return filas
+
+
+def guardar_xlsx_control(csvf, filas):
+    """El mismo control en Excel, junto al CSV.
+
+    El CSV va sin BOM, como el de la plataforma, y por eso Excel y Sheets
+    lo abren como si fuera latin-1: "Niños" sale "NiÃ±os". El .xlsx guarda
+    el texto sin ambiguedad y cada dato en su columna.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    ruta = os.path.splitext(csvf)[0] + ".xlsx"
+    libro = Workbook()
+    hoja = libro.active
+    hoja.title = "Casos PNR"
+    titulos = [t for _, t in COLUMNAS_CONTROL]
+    hoja.append(titulos)
+    for celda in hoja[1]:
+        celda.font = Font(bold=True, color="FFFFFF")
+        celda.fill = PatternFill("solid", fgColor="1E2128")
+    for fila in filas:
+        hoja.append(fila)
+    # Todo como texto: los ids no pasan a notacion cientifica
+    for fila in hoja.iter_rows(min_row=2):
+        for celda in fila:
+            celda.number_format = "@"
+    for i, t in enumerate(titulos, start=1):
+        largo = max([len(str(f[i - 1])) for f in filas] + [len(t)])
+        hoja.column_dimensions[get_column_letter(i)].width = min(max(10, largo + 2), 50)
+    hoja.freeze_panes = "A2"
+    hoja.auto_filter.ref = hoja.dimensions
+    libro.save(ruta)
+    return ruta
+
+
+# ------------------------------------------------- Google Sheets del control
+#
+# webapp_pnr.json junto al programa (o dentro del .exe):
+#   {"url": "https://script.google.com/macros/s/.../exec", "token": "..."}
+# Es la Web App del script del Sheets de PNR (apps_script/extractor_pnr.gs):
+# escribe en REPORTE_TEMP (A:W, desde la fila 2) y corre "Actualizar
+# Consolidado de Temporal".
+
+NOMBRE_CONFIG_SHEETS = "webapp_pnr.json"
+
+
+def _config_sheets():
+    candidatos = [os.path.join(BASE_DIR, NOMBRE_CONFIG_SHEETS)]
+    interno = getattr(sys, "_MEIPASS", None)
+    if interno:
+        candidatos.append(os.path.join(interno, NOMBRE_CONFIG_SHEETS))
+    for ruta in candidatos:
+        if os.path.isfile(ruta):
+            with open(ruta, encoding="utf-8-sig") as f:
+                config = json.load(f)
+            if "/exec" in config.get("url", "") and config.get("token"):
+                return config
+    return None
+
+
+def hay_sheets():
+    return _config_sheets() is not None
+
+
+def _para_sheets(valor):
+    """'2026-10-21T11:58:25' -> '2026-10-21 11:58:25': asi Sheets la toma
+    como fecha y hora, igual que al importar el CSV a mano."""
+    t = valor if isinstance(valor, str) else str(valor)
+    if len(t) == 19 and t[4] == "-" and t[10] == "T":
+        return t.replace("T", " ")
+    return t
+
+
+def una_por_envio(filas):
+    """El CONSOLIDADO lleva una fila por ID DE ENVIO (columna L). Si un
+    paquete tiene varios reclamos, se queda el mas reciente (FECHA DEL
+    CASO, columna B): si fueran todos, en cada carga uno pisaria al otro
+    y saldrian como "actualizados" sin que nada cambiara."""
+    elegidas, orden = {}, []
+    for f in filas:
+        envio = str(f[11]).strip()
+        if not envio:
+            orden.append(f)
+            continue
+        if envio not in elegidas:
+            orden.append(envio)
+            elegidas[envio] = f
+        elif str(f[1]) > str(elegidas[envio][1]):
+            elegidas[envio] = f
+    return [elegidas[x] if isinstance(x, str) else x for x in orden]
+
+
+def enviar_a_sheets(filas):
+    """Manda las filas (sin encabezado) a REPORTE_TEMP y consolida.
+    Devuelve lo que contesta el script (nuevos, actualizados, ...)."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    filas = una_por_envio(filas)
+    config = _config_sheets()
+    if not config:
+        raise RuntimeError(f"Falta {NOMBRE_CONFIG_SHEETS} junto al programa.")
+    cuerpo = json.dumps({"token": config["token"], "accion": "cargar_pnr",
+                         "filas": [[_para_sheets(v) for v in f] for f in filas]},
+                        ensure_ascii=False).encode("utf-8")
+    url = f"{config['url']}?{urllib.parse.urlencode({'token': config['token']})}"
+    req = urllib.request.Request(url, data=cuerpo, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        # Apps Script contesta con un 302 a googleusercontent.com; urllib lo
+        # sigue con un GET, que es como se lee la respuesta
+        with urllib.request.urlopen(req, timeout=360) as r:
+            texto = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"El Google Sheets respondio HTTP {e.code}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"No se pudo conectar con el Google Sheets: {e.reason}")
+    try:
+        resp = json.loads(texto)
+    except json.JSONDecodeError:
+        raise RuntimeError("El Google Sheets no devolvio JSON: "
+                           + " ".join(texto[:120].split()))
+    if not resp.get("ok"):
+        raise RuntimeError(f"El Google Sheets respondio: {resp.get('error')}")
+    return resp
 
 
 def guardar(registros, periodo, con_extras=False, con_detalle=False,
