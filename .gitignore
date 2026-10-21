@@ -94,3 +94,9 @@ webapp_sheets.json
 direcciones/
 chrome_direcciones/
 1_finales/Extractor_Direcciones.exe
+
+# Reporte de operacion: la Web App (URL + clave), la sesion de Chrome y el
+# .exe, que lleva la clave dentro
+webapp_reportes.json
+chrome_reportes/
+1_finales/Reporte_Operacion.exe

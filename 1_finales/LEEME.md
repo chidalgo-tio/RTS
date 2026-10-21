@@ -1,6 +1,6 @@
 # Los programas que se usan
 
-Estos ocho son los definitivos. Todo lo demás en el repo es el camino que
+Estos nueve son los definitivos. Todo lo demás en el repo es el camino que
 llevó hasta ellos.
 
 | Programa | Qué hace | Tiempo |
@@ -13,6 +13,7 @@ llevó hasta ellos.
 | **`MapasMeli.exe`** | Paradas de cada ruta con sus coordenadas | ~1 min/día |
 | **`Extractor_RTS.exe`** | Estatus de RTS y devoluciones en la hoja, con alertas y correo diario | ~2 s/paquete |
 | **`Extractor_Direcciones.exe`** | Comprador, dirección y coordenadas de cada paquete; polígonos de entrega en mapa | ~2 s/paquete |
+| **`Reporte_Operacion.exe`** | Reporte de operación Last Mile por fechas, consolidado en Google Sheets | ~30 s/mes |
 
 ## `DriversMeli.exe` — el padrón
 
@@ -447,6 +448,49 @@ salida (habrá varios CEDIS).
 
 Los reportes y el mapa traen nombres, teléfonos y direcciones: la carpeta
 `direcciones\` no se sube al repo.
+
+## `Reporte_Operacion.exe` — reporte de operación al Google Sheets
+
+```
+Desde [19/10/2026]  Hasta [19/10/2026]  [Ayer] [7 días] [Este mes]
+[ EXTRAER AL GOOGLE SHEETS ]  [ DETENER ]
+```
+
+Baja de **Reportes de operación › General › Last Mile**
+(`envios.adminml.com/carriers/reports`) el mismo Excel que el botón
+"Descargar CSV": una fila por ruta y por día (Fecha, Id de la ruta,
+transportista, vehículo, placa, municipio, km, Service center, envíos
+despachados y entregados, % de entrega, ORH, SPORH, DPPH).
+
+El botón pide `/api/carriers/reports?mile=LM&init_date=…&end_date=…&report_type=carrier`;
+el programa lo pide igual con `fetch` desde la página (la sesión la pone
+Chrome), en tramos de hasta 31 días.
+
+Todo va al Google Sheets **Reportes de operación ML**
+(`1lyoWfp8dLrte7Q6qZnyqpnjGMbI5ZFP0awJ1RRyF7Tg`):
+
+- **Extraccion**: lo de la última corrida.
+- **Consolidado**: una fila por **Fecha + Id de la ruta**, en orden
+  cronológico. Si una fecha se vuelve a extraer, la fila que cambió se
+  actualiza y la que no, se deja.
+- **Registro**: cuándo se cargó cada rango, con nuevas, actualizadas y sin
+  cambio.
+
+Usa su propio perfil de Chrome (`chrome_reportes/`), así que la sesión
+queda guardada. Chrome queda abierto al terminar.
+
+**El `.exe` no está en el repo**: lleva la clave de la Web App. Para
+compilarlo hace falta `webapp_reportes.json` junto al código:
+
+```
+pyinstaller --onefile --windowed --name Reporte_Operacion ^
+    --collect-all selenium --add-data "webapp_reportes.json;." reporte_operacion_app.py
+```
+
+La Web App está en `apps_script/reportes_operacion.gs` (proyecto de Apps
+Script `11Eqjbs0fw8vMa2miMQ5wzZViyPK824UOzbK4fqCJZCHUAPFk2b3GZZz_`, ligado
+al Sheets). Se publica con clasp desde `apps_script/proyecto_reportes`, la
+copia con la clave real.
 
 ## Requisitos
 
